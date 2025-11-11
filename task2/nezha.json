@@ -1,0 +1,16 @@
+{
+  "name": "NZ",
+  "description": "NeZha.",
+  "image": "ipfs://bafkreibzkgjzq75nupm3gnikxkjjodpebyaecusuy7f55y26lawi76tjvy",
+  "external_url": "https://silver-casual-toucan-398.mypinata.cloud/ipfs/bafkreibzkgjzq75nupm3gnikxkjjodpebyaecusuy7f55y26lawi76tjvy",
+  "attributes": [
+    {
+      "trait_type": "Mood",
+      "value": "Sleepy"
+    },
+    {
+      "trait_type": "Rarity",
+      "value": "Legendary"
+    }
+  ]
+}
