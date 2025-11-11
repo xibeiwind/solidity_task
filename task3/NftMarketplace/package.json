@@ -2,7 +2,9 @@
   "name": "nft-marketplace",
   "version": "1.0.0",
   "scripts": {
-    "deploy:sepolia": "npx hardhat run --network sepolia scripts/deploy.ts"
+    "deploy:sepolia": "npx hardhat run --network sepolia scripts/deploy.ts",
+    "test": "npx hardhat test --no-compile",
+    "compile": "npx hardhat compile --force"
   },
   "devDependencies": {
     "@chainlink/contracts": "^1.5.0",

@@ -1,15 +1,23 @@
-import type { HardhatUserConfig } from "hardhat/config";
+import type { HardhatUserConfig } from "hardhat/types/config";
 import "@nomicfoundation/hardhat-toolbox";
 import "dotenv/config";
 
 const config: HardhatUserConfig = {
-  solidity: "0.8.28",
-    networks: {
+  solidity:{ version: "0.8.28",
+    settings: {
+      optimizer: {
+        enabled: true,
+        runs: 200
+      }
+    }
+  },  
+  networks: {
     sepolia: {
       url: process.env.SEPOLIA_URL,
       accounts: [process.env.ACCOUNT_PRIVATE_KEY!],
     },
   },
+  
 };
 
 export default config;
