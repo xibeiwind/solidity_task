@@ -2,3 +2,4 @@
 artifacts
 .prettierrc.json
 */.deps/npm/*
+task3/NftMarketplace/yarn.lock
