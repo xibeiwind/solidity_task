@@ -10,7 +10,7 @@ async function main() {
     const blockNumber = await provider.getBlockNumber();
     console.log("当前网络的区块高度：", blockNumber);
 
-    const contracts=["MyNFT"];
+    const contracts=["MyToken", "MyNFT", "NFTAuction"];
     
     for (const contractName of contracts) { 
       const contract = await ethers.deployContract(contractName);
