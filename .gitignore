@@ -1,3 +1,4 @@
 .states
 artifacts
 .prettierrc.json
+*/.deps/npm/*
