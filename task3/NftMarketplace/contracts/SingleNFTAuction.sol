@@ -4,19 +4,46 @@ pragma solidity ^0.8.22;
 // OpenZeppelin 合约导入
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol"; // ERC20代币接口
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol"; // ERC721 NFT接口
-
+import "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import "@openzeppelin/contracts/access/Ownable.sol"; // 所有权管理
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol"; // 重入攻击防护
+import "@openzeppelin/contracts/proxy/utils/Initializable.sol"; // 可升级合约支持
 import "./NFTAuctionBase.sol";
 /**
  * @title SingleNFTAuction
  * @dev 单个NFT拍卖合约，支持ETH和ERC20代币支付
  * @notice 该合约专门处理单个NFT的拍卖，部署时即绑定特定NFT
  * @dev 继承ReentrancyGuard防止重入攻击，IERC721Receiver用于接收NFT，Ownable用于权限管理
+ * @dev 支持Chainlink预言机获取实时价格，提供美元价值计算
+ * @dev 包含完整的拍卖生命周期管理：开始、出价、结束、资金领取等
+ * @dev 支持两种支付方式：ETH和ERC20代币
+ * @dev 提供安全机制：重入攻击防护、紧急提款、资金安全退回等
+ * @dev 使用Initializable支持可升级合约模式
  */
-contract SingleNFTAuction is NFTAuctionBase, ReentrancyGuard, Ownable {
-    // 拍卖信息
+contract SingleNFTAuction is
+    NFTAuctionBase,
+    ReentrancyGuard,
+    Ownable,
+    Initializable
+{
+    /**
+     * @dev 拍卖信息结构体
+     * @notice 存储当前拍卖的所有相关信息
+     * @dev 包括卖家、NFT信息、出价信息、拍卖状态等
+     */
     AuctionInfo public auction;
+
+    /**
+     * @dev ETH价格预言机合约地址
+     * @notice 用于获取ETH/USD价格，用于计算出价的美元价值
+     */
+    address public ethPriceFeed;
+
+    /**
+     * @dev ERC20代币价格预言机合约地址
+     * @notice 用于获取ERC20代币/USD价格，用于计算出价的美元价值
+     */
+    address public erc20PriceFeed;
 
     /**
      * @dev 用户地址到可领取ETH金额的映射
@@ -30,17 +57,35 @@ contract SingleNFTAuction is NFTAuctionBase, ReentrancyGuard, Ownable {
      */
     mapping(address => mapping(address => uint256)) public pendingTokenReturns;
 
-
     /**
      * @dev 构造函数
-     * @notice 初始化合约所有者
+     * @notice 初始化合约所有者和拍卖状态
+     * @dev 继承Ownable合约，将部署者设置为合约所有者
+     * @dev 初始化拍卖状态为NotStarted，表示拍卖尚未开始
      */
     constructor() Ownable(msg.sender) {
         // 初始化拍卖状态为未开始
         auction.status = AuctionStatus.NotStarted;
     }
 
-
+    /**
+     * @dev 初始化函数
+     * @notice 设置价格预言机地址，用于获取ETH和ERC20代币价格
+     * @param _ethPriceFeed ETH/USD价格预言机合约地址
+     * @param _erc20PriceFeed ERC20代币/USD价格预言机合约地址
+     * @dev 使用initializer修饰符确保只能初始化一次
+     * @dev 需要验证预言机地址不为零地址
+     * @dev 此函数通常在合约部署后立即调用，设置必要的预言机地址
+     */
+    function initialize(
+        address _ethPriceFeed,
+        address _erc20PriceFeed
+    ) public initializer {
+        require(_ethPriceFeed != address(0), "Invalid price feed address");
+        require(_erc20PriceFeed != address(0), "Invalid price feed address");
+        ethPriceFeed = _ethPriceFeed;
+        erc20PriceFeed = _erc20PriceFeed;
+    }
 
     /**
      * @dev 拍卖活跃状态检查修饰符
@@ -48,14 +93,8 @@ contract SingleNFTAuction is NFTAuctionBase, ReentrancyGuard, Ownable {
      * @dev 检查拍卖状态为Active且当前时间小于结束时间
      */
     modifier auctionIsActive() {
-        require(
-            auction.status == AuctionStatus.Active,
-            "Auction not active"
-        );
-        require(
-            block.timestamp < auction.endTime,
-            "Auction has ended"
-        );
+        require(auction.status == AuctionStatus.Active, "Auction not active");
+        require(block.timestamp < auction.endTime, "Auction has ended");
         _;
     }
 
@@ -71,6 +110,58 @@ contract SingleNFTAuction is NFTAuctionBase, ReentrancyGuard, Ownable {
             "Auction not ended"
         );
         _;
+    }
+
+    /**
+     * @dev 设置ETH价格预言机地址
+     * @notice 更新ETH/USD价格预言机合约地址
+     * @param _ethPriceFeed 新的ETH价格预言机合约地址
+     * @dev 只有合约所有者可以调用此函数
+     * @dev 用于在预言机合约升级或更换时更新地址
+     */
+    function setEthPriceFeed(address _ethPriceFeed) external onlyOwner {
+        require(_ethPriceFeed != address(0), "Invalid price feed address");
+        ethPriceFeed = _ethPriceFeed;
+    }
+
+    /**
+     * @dev 设置ERC20价格预言机地址
+     * @notice 更新ERC20代币/USD价格预言机合约地址
+     * @param _erc20PriceFeed 新的ERC20价格预言机合约地址
+     * @dev 只有合约所有者可以调用此函数
+     * @dev 用于在预言机合约升级或更换时更新地址
+     */
+    function setERC20PriceFeed(address _erc20PriceFeed) external onlyOwner {
+        require(_erc20PriceFeed != address(0), "Invalid price feed address");
+        erc20PriceFeed = _erc20PriceFeed;
+    }
+
+    /**
+     * @dev 获取ETH当前价格
+     * @notice 从Chainlink预言机获取ETH/USD价格
+     * @return 当前ETH价格（以USD计，包含8位小数）
+     * @dev 使用AggregatorV3Interface与Chainlink预言机交互
+     * @dev 返回的价格是int256类型，需要转换为uint256
+     * @dev 价格数据包含8位小数，例如：2000.00 USD = 200000000000
+     */
+    function getEthPrice() internal view returns (uint256) {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(ethPriceFeed);
+        (, int256 price, , , ) = priceFeed.latestRoundData();
+        return uint256(price);
+    }
+
+    /**
+     * @dev 获取ERC20代币当前价格
+     * @notice 从Chainlink预言机获取ERC20代币/USD价格
+     * @return 当前ERC20代币价格（以USD计，包含8位小数）
+     * @dev 使用AggregatorV3Interface与Chainlink预言机交互
+     * @dev 返回的价格是int256类型，需要转换为uint256
+     * @dev 价格数据包含8位小数，例如：1.00 USD = 100000000
+     */
+    function getERC20Price() internal view returns (uint256) {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(erc20PriceFeed);
+        (, int256 price, , , ) = priceFeed.latestRoundData();
+        return uint256(price);
     }
 
     /**
@@ -99,7 +190,10 @@ contract SingleNFTAuction is NFTAuctionBase, ReentrancyGuard, Ownable {
         require(nftContract != address(0), "Invalid NFT contract");
         require(startingPrice > 0, "Starting price must be > 0");
         require(duration > 0 && duration <= 30 days, "Invalid duration");
-        require(auction.status == AuctionStatus.NotStarted, "Auction already started");
+        require(
+            auction.status == AuctionStatus.NotStarted,
+            "Auction already started"
+        );
 
         // 如果使用ERC20支付，验证代币地址
         if (paymentToken == PaymentToken.ERC20) {
@@ -175,7 +269,11 @@ contract SingleNFTAuction is NFTAuctionBase, ReentrancyGuard, Ownable {
         auction.highestBidder = msg.sender;
         auction.highestBid = msg.value;
 
-        emit BidPlaced(msg.sender, msg.value);
+        // 使用预言机获取ETH当前价格
+        uint256 ethPrice = getEthPrice();
+        // 将currentHighestBid转换为USD价格
+        uint256 currentHighestBidInUSD = (msg.value * ethPrice) / 10 ** 18;
+        emit BidPlaced(msg.sender, msg.value, currentHighestBidInUSD);
     }
 
     /**
@@ -188,7 +286,9 @@ contract SingleNFTAuction is NFTAuctionBase, ReentrancyGuard, Ownable {
      * @dev 如果之前有出价者，其代币会被记录到待退款映射中
      * @dev 使用缓存优化减少存储读取
      */
-    function placeBidERC20(uint256 amount) external nonReentrant auctionIsActive {
+    function placeBidERC20(
+        uint256 amount
+    ) external nonReentrant auctionIsActive {
         require(
             auction.paymentToken == PaymentToken.ERC20,
             "Payment must be in ERC20"
@@ -231,7 +331,7 @@ contract SingleNFTAuction is NFTAuctionBase, ReentrancyGuard, Ownable {
         auction.highestBidder = msg.sender;
         auction.highestBid = amount;
 
-        emit BidPlaced(msg.sender, amount);
+        emit BidPlaced(msg.sender, amount, 0);
     }
 
     /**
@@ -252,10 +352,7 @@ contract SingleNFTAuction is NFTAuctionBase, ReentrancyGuard, Ownable {
 
         if (auction.highestBidder != address(0) && hasMetReserve) {
             // 有有效出价且达到保留价格
-            emit AuctionEnded(
-                auction.highestBidder,
-                auction.highestBid
-            );
+            emit AuctionEnded(auction.highestBidder, auction.highestBid);
         } else {
             // 没有达到保留价格或无出价
             emit AuctionEnded(address(0), 0);
