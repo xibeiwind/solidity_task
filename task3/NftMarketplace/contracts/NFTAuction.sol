@@ -37,21 +37,37 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
     /**
      * @dev 拍卖信息结构体
      * @notice 存储单个拍卖的所有相关信息
+     * @dev 优化存储布局，将布尔值和枚举打包到同一个存储槽
      */
     struct Auction {
-        address seller; // 卖家地址，NFT的所有者
-        address nftContract; // NFT合约地址
-        uint256 tokenId; // NFT token ID
-        uint256 startingPrice; // 起拍价格，最低出价必须大于等于此价格
-        uint256 reservePrice; // 保留价格，拍卖结束时必须达到此价格才算成功
-        uint256 endTime; // 拍卖结束时间戳（秒）
-        address highestBidder; // 当前最高出价者地址
-        uint256 highestBid; // 当前最高出价金额
-        PaymentToken paymentToken; // 支付币种类型
-        address erc20Token; // ERC20代币合约地址（如果使用ERC20支付）
-        AuctionStatus status; // 当前拍卖状态
-        bool sellerClaimed; // 卖家是否已领取拍卖所得资金
-        bool highestBidderClaimed; // 最高出价者是否已领取NFT
+        address seller; // 卖家地址，NFT的所有者 (slot 0)
+        address nftContract; // NFT合约地址 (slot 1)
+        uint256 tokenId; // NFT token ID (slot 2)
+        uint256 startingPrice; // 起拍价格 (slot 3)
+        uint256 reservePrice; // 保留价格 (slot 4)
+        uint256 endTime; // 拍卖结束时间戳（秒）(slot 5)
+        address highestBidder; // 当前最高出价者地址 (slot 6)
+        uint256 highestBid; // 当前最高出价金额 (slot 7)
+        address erc20Token; // ERC20代币合约地址（如果使用ERC20支付）(slot 8)
+        // 打包字段 (slot 9)
+        PaymentToken paymentToken; // 支付币种类型 (占用 1 字节)
+        AuctionStatus status; // 当前拍卖状态 (占用 1 字节)
+        bool sellerClaimed; // 卖家是否已领取拍卖所得资金 (占用 1 字节)
+        bool highestBidderClaimed; // 最高出价者是否已领取NFT (占用 1 字节)
+    }
+
+    /**
+     * @dev 创建拍卖参数结构体
+     * @notice 用于优化createAuction函数的参数传递
+     */
+    struct CreateAuctionParams {
+        address nftContract;
+        uint256 tokenId;
+        uint256 startingPrice;
+        uint256 reservePrice;
+        uint256 duration;
+        PaymentToken paymentToken;
+        address erc20Token;
     }
 
     /**
@@ -97,11 +113,12 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
      * @param endTime 拍卖结束时间
      * @param paymentToken 支付币种类型
      * @param erc20Token ERC20代币地址
+     * @dev 优化：只对最重要的字段建立索引，减少gas成本
      */
     event AuctionCreated(
         uint256 indexed auctionId,
         address indexed seller,
-        address indexed nftContract,
+        address nftContract,
         uint256 tokenId,
         uint256 startingPrice,
         uint256 reservePrice,
@@ -118,7 +135,7 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
      */
     event BidPlaced(
         uint256 indexed auctionId,
-        address indexed bidder,
+        address bidder,
         uint256 amount
     );
 
@@ -130,7 +147,7 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
      */
     event AuctionEnded(
         uint256 indexed auctionId,
-        address indexed winner,
+        address winner,
         uint256 winningBid
     );
 
@@ -155,7 +172,7 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
      */
     event TokenFundsWithdrawn(
         address indexed user,
-        address indexed token,
+        address token,
         uint256 amount
     );
 
@@ -257,38 +274,73 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
         PaymentToken paymentToken,
         address erc20Token
     ) external returns (uint256) {
+        CreateAuctionParams memory params = CreateAuctionParams({
+            nftContract: nftContract,
+            tokenId: tokenId,
+            startingPrice: startingPrice,
+            reservePrice: reservePrice,
+            duration: duration,
+            paymentToken: paymentToken,
+            erc20Token: erc20Token
+        });
+        return _createAuction(params);
+    }
+
+    /**
+     * @dev 优化的创建拍卖函数（使用参数结构体）
+     * @notice 创建一个新的NFT拍卖，使用参数结构体减少calldata成本
+     * @param params 创建拍卖参数结构体
+     * @return auctionId 新创建的拍卖ID
+     * @dev 内部实现，减少重复的参数验证和逻辑
+     */
+    function createAuctionOptimized(
+        CreateAuctionParams calldata params
+    ) external returns (uint256) {
+        return _createAuction(params);
+    }
+
+    /**
+     * @dev 内部创建拍卖函数
+     * @notice 创建拍卖的内部实现，减少重复代码
+     * @param params 创建拍卖参数结构体
+     * @return auctionId 新创建的拍卖ID
+     * @dev 内部函数，包含所有创建拍卖的核心逻辑
+     */
+    function _createAuction(
+        CreateAuctionParams memory params
+    ) internal returns (uint256) {
         // 参数验证
-        require(nftContract != address(0), "Invalid NFT contract");
-        require(startingPrice > 0, "Starting price must be > 0");
-        require(duration > 0 && duration <= 30 days, "Invalid duration");
+        require(params.nftContract != address(0), "Invalid NFT contract");
+        require(params.startingPrice > 0, "Starting price must be > 0");
+        require(params.duration > 0 && params.duration <= 30 days, "Invalid duration");
 
         // 如果使用ERC20支付，验证代币地址
-        if (paymentToken == PaymentToken.ERC20) {
-            require(erc20Token != address(0), "Invalid ERC20 token");
+        if (params.paymentToken == PaymentToken.ERC20) {
+            require(params.erc20Token != address(0), "Invalid ERC20 token");
         }
 
         // 生成新的拍卖ID
         uint256 auctionId = _auctionIdCounter++;
 
         // 转移NFT到合约进行托管
-        IERC721(nftContract).safeTransferFrom(
+        IERC721(params.nftContract).safeTransferFrom(
             msg.sender,
             address(this),
-            tokenId
+            params.tokenId
         );
 
         // 创建拍卖信息
         auctions[auctionId] = Auction({
             seller: msg.sender,
-            nftContract: nftContract,
-            tokenId: tokenId,
-            startingPrice: startingPrice,
-            reservePrice: reservePrice,
-            endTime: block.timestamp + duration,
+            nftContract: params.nftContract,
+            tokenId: params.tokenId,
+            startingPrice: params.startingPrice,
+            reservePrice: params.reservePrice,
+            endTime: block.timestamp + params.duration,
             highestBidder: address(0),
             highestBid: 0,
-            paymentToken: paymentToken,
-            erc20Token: erc20Token,
+            paymentToken: params.paymentToken,
+            erc20Token: params.erc20Token,
             status: AuctionStatus.Active,
             sellerClaimed: false,
             highestBidderClaimed: false
@@ -298,13 +350,13 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
         emit AuctionCreated(
             auctionId,
             msg.sender,
-            nftContract,
-            tokenId,
-            startingPrice,
-            reservePrice,
-            block.timestamp + duration,
-            paymentToken,
-            erc20Token
+            params.nftContract,
+            params.tokenId,
+            params.startingPrice,
+            params.reservePrice,
+            block.timestamp + params.duration,
+            params.paymentToken,
+            params.erc20Token
         );
 
         return auctionId;
@@ -317,6 +369,7 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
      * @dev 此函数需要支付ETH，出价必须高于当前最高出价且不低于起拍价格
      * @dev 如果之前有出价者，其资金会被记录到待退款映射中
      * @dev 使用nonReentrant修饰符防止重入攻击
+     * @dev 使用缓存优化减少存储读取
      */
     function placeBidETH(
         uint256 auctionId
@@ -328,19 +381,25 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
         auctionActive(auctionId)
     {
         Auction storage auction = auctions[auctionId];
+        
+        // 缓存频繁访问的变量到内存
+        uint256 currentHighestBid = auction.highestBid;
+        address currentHighestBidder = auction.highestBidder;
+        uint256 currentStartingPrice = auction.startingPrice;
+        
         require(
             auction.paymentToken == PaymentToken.ETH,
             "Payment must be in ETH"
         );
         require(
-            msg.value > auction.highestBid,
+            msg.value > currentHighestBid,
             "Bid must be higher than current bid"
         );
-        require(msg.value >= auction.startingPrice, "Bid below starting price");
+        require(msg.value >= currentStartingPrice, "Bid below starting price");
 
         // 如果之前有出价，退还给之前的最高出价者
-        if (auction.highestBidder != address(0)) {
-            pendingReturns[auction.highestBidder] += auction.highestBid;
+        if (currentHighestBidder != address(0)) {
+            pendingReturns[currentHighestBidder] += currentHighestBid;
         }
 
         // 更新最高出价
@@ -359,24 +418,32 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
      * @dev 出价必须高于当前最高出价且不低于起拍价格
      * @dev 检查用户余额和授权额度是否足够
      * @dev 如果之前有出价者，其代币会被记录到待退款映射中
+     * @dev 使用缓存优化减少存储读取
      */
     function placeBidERC20(
         uint256 auctionId,
         uint256 amount
     ) external nonReentrant auctionExists(auctionId) auctionActive(auctionId) {
         Auction storage auction = auctions[auctionId];
+        
+        // 缓存频繁访问的变量到内存
+        uint256 currentHighestBid = auction.highestBid;
+        address currentHighestBidder = auction.highestBidder;
+        uint256 currentStartingPrice = auction.startingPrice;
+        address currentERC20Token = auction.erc20Token;
+        
         require(
             auction.paymentToken == PaymentToken.ERC20,
             "Payment must be in ERC20"
         );
         require(
-            amount > auction.highestBid,
+            amount > currentHighestBid,
             "Bid must be higher than current bid"
         );
-        require(amount >= auction.startingPrice, "Bid below starting price");
+        require(amount >= currentStartingPrice, "Bid below starting price");
 
         // 检查用户余额和授权
-        IERC20 token = IERC20(auction.erc20Token);
+        IERC20 token = IERC20(currentERC20Token);
         require(
             token.balanceOf(msg.sender) >= amount,
             "Insufficient token balance"
@@ -387,10 +454,10 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
         );
 
         // 如果之前有出价，退还给之前的最高出价者
-        if (auction.highestBidder != address(0)) {
-            pendingTokenReturns[auction.highestBidder][
-                auction.erc20Token
-            ] += auction.highestBid;
+        if (currentHighestBidder != address(0)) {
+            pendingTokenReturns[currentHighestBidder][
+                currentERC20Token
+            ] += currentHighestBid;
         }
 
         // 从出价者转移代币到合约
