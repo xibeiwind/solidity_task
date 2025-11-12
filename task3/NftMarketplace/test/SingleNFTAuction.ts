@@ -17,8 +17,8 @@ describe("SingleNFTAuction", function () {
     const myToken = await MyToken.deploy();
 
     // 需要给bidder1和bidder2分配10000个代币
-    await myToken.mint(bidder1.address, 10000);
-    await myToken.mint(bidder2.address, 10000);
+    await myToken.mint(bidder1.address, 200);
+    await myToken.mint(bidder2.address, 500);
 
     // 部署 SingleNFTAuction 合约
     const SingleNFTAuction = await ethers.getContractFactory("SingleNFTAuction");
@@ -381,8 +381,8 @@ describe("SingleNFTAuction", function () {
     it("应该能够使用 ERC20 出价", async function () {
       const { singleNFTAuction, myNFT, myToken, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
 
-      const startingPrice = ethers.parseEther("100");
-      const bidAmount = ethers.parseEther("150");
+      const startingPrice = 100;
+      const bidAmount = 150;
 
       // 创建拍卖
       await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
@@ -414,8 +414,8 @@ describe("SingleNFTAuction", function () {
     it("ERC20 出价必须检查余额和授权", async function () {
       const { singleNFTAuction, myNFT, myToken, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
 
-      const startingPrice = ethers.parseEther("100");
-      const bidAmount = ethers.parseEther("150");
+      const startingPrice = 100;
+      const bidAmount = 150;
 
       // 创建拍卖
       await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
@@ -444,8 +444,8 @@ describe("SingleNFTAuction", function () {
     it("ERC20 出价应该转移代币到合约", async function () {
       const { singleNFTAuction, myNFT, myToken, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
 
-      const startingPrice = ethers.parseEther("100");
-      const bidAmount = ethers.parseEther("150");
+      const startingPrice = BigInt(100);
+      const bidAmount = BigInt(150);
 
       // 创建拍卖
       await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
@@ -488,14 +488,15 @@ describe("SingleNFTAuction", function () {
         0,
         startingPrice,
         0,
-        3600,
+        5,
         0, // ETH
         ethers.ZeroAddress
       );
 
       // 出价
       await singleNFTAuction.connect(bidder1).placeBidETH({ value: ethers.parseEther("1.5") });
-
+      // 等待5秒
+      await new Promise((resolve) => setTimeout(resolve, 5000));
       // 结束拍卖
       await expect(singleNFTAuction.endAuction())
         .to.emit(singleNFTAuction, "AuctionEnded")
@@ -591,9 +592,9 @@ describe("SingleNFTAuction", function () {
     it("应该能够提取 ERC20 代币", async function () {
       const { singleNFTAuction, myNFT, myToken, seller, bidder1, bidder2 } = await loadFixture(deploySingleNFTAuctionFixture);
 
-      const startingPrice = ethers.parseEther("100");
-      const bid1Amount = ethers.parseEther("150");
-      const bid2Amount = ethers.parseEther("200");
+      const startingPrice =BigInt("100");
+      const bid1Amount = BigInt("150");
+      const bid2Amount = BigInt("200");
 
       // 创建拍卖
       await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
