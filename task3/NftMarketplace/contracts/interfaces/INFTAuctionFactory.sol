@@ -4,20 +4,20 @@ pragma solidity ^0.8.22;
 interface INFTAuctionFactory {
     event AuctionCreated(
         address auctionAddress,
-        address nftAddress,
+        address nftContract,
         address seller,
         uint256 tokenId,
         uint256 startingPrice,
-        uint256 endingPrice,
+        uint256 reservePrice,
         uint256 duration
     );
 
     function createAuction(
-        address nftAddress,
+        address nftContract,
         address seller,
         uint256 tokenId,
         uint256 startingPrice,
-        uint256 endingPrice,
+        uint256 reservePrice,
         uint256 duration
     ) external returns (address);
 
@@ -27,4 +27,6 @@ interface INFTAuctionFactory {
     function allAuctionsLength() external view returns (uint);
     function setFeeTo(address) external;
     function setFeeToSetter(address) external;
+    
+    function isFactoryAuction(address auctionAddress) external view returns (bool);
 }
