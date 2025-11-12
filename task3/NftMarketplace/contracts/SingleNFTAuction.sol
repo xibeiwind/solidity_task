@@ -4,11 +4,11 @@ pragma solidity ^0.8.22;
 // OpenZeppelin 合约导入
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol"; // ERC20代币接口
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol"; // ERC721 NFT接口
-import "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import "@openzeppelin/contracts/access/Ownable.sol"; // 所有权管理
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol"; // 重入攻击防护
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol"; // 可升级合约支持
 import "./NFTAuctionBase.sol";
+import "./interfaces/IPriceOracle.sol";
 /**
  * @title SingleNFTAuction
  * @dev 单个NFT拍卖合约，支持ETH和ERC20代币支付
@@ -34,16 +34,10 @@ contract SingleNFTAuction is
     AuctionInfo public auction;
 
     /**
-     * @dev ETH价格预言机合约地址
-     * @notice 用于获取ETH/USD价格，用于计算出价的美元价值
+     * @dev 价格预言机合约地址
+     * @notice 用于查询ETH和ERC20代币的美元价格
      */
-    address public ethPriceFeed;
-
-    /**
-     * @dev ERC20代币价格预言机合约地址
-     * @notice 用于获取ERC20代币/USD价格，用于计算出价的美元价值
-     */
-    address public erc20PriceFeed;
+    IPriceOracle public priceOracle;
 
     /**
      * @dev 用户地址到可领取ETH金额的映射
@@ -71,20 +65,14 @@ contract SingleNFTAuction is
     /**
      * @dev 初始化函数
      * @notice 设置价格预言机地址，用于获取ETH和ERC20代币价格
-     * @param _ethPriceFeed ETH/USD价格预言机合约地址
-     * @param _erc20PriceFeed ERC20代币/USD价格预言机合约地址
+     * @param _priceOracle 价格预言机合约地址
      * @dev 使用initializer修饰符确保只能初始化一次
      * @dev 需要验证预言机地址不为零地址
      * @dev 此函数通常在合约部署后立即调用，设置必要的预言机地址
      */
-    function initialize(
-        address _ethPriceFeed,
-        address _erc20PriceFeed
-    ) public initializer {
-        require(_ethPriceFeed != address(0), "Invalid price feed address");
-        require(_erc20PriceFeed != address(0), "Invalid price feed address");
-        ethPriceFeed = _ethPriceFeed;
-        erc20PriceFeed = _erc20PriceFeed;
+    function initialize(address _priceOracle) public initializer {
+        require(_priceOracle != address(0), "Invalid price oracle address");
+        priceOracle = IPriceOracle(_priceOracle);
     }
 
     /**
@@ -113,56 +101,18 @@ contract SingleNFTAuction is
     }
 
     /**
-     * @dev 设置ETH价格预言机地址
-     * @notice 更新ETH/USD价格预言机合约地址
-     * @param _ethPriceFeed 新的ETH价格预言机合约地址
+     * @dev 设置价格预言机地址
+     * @notice 更新价格预言机合约地址
+     * @param _priceOracle 新的价格预言机合约地址
      * @dev 只有合约所有者可以调用此函数
      * @dev 用于在预言机合约升级或更换时更新地址
      */
-    function setEthPriceFeed(address _ethPriceFeed) external onlyOwner {
-        require(_ethPriceFeed != address(0), "Invalid price feed address");
-        ethPriceFeed = _ethPriceFeed;
+    function setPriceOracle(address _priceOracle) external onlyOwner {
+        require(_priceOracle != address(0), "Invalid price oracle address");
+        priceOracle = IPriceOracle(_priceOracle);
+        emit PriceOracleUpdated(_priceOracle);
     }
 
-    /**
-     * @dev 设置ERC20价格预言机地址
-     * @notice 更新ERC20代币/USD价格预言机合约地址
-     * @param _erc20PriceFeed 新的ERC20价格预言机合约地址
-     * @dev 只有合约所有者可以调用此函数
-     * @dev 用于在预言机合约升级或更换时更新地址
-     */
-    function setERC20PriceFeed(address _erc20PriceFeed) external onlyOwner {
-        require(_erc20PriceFeed != address(0), "Invalid price feed address");
-        erc20PriceFeed = _erc20PriceFeed;
-    }
-
-    /**
-     * @dev 获取ETH当前价格
-     * @notice 从Chainlink预言机获取ETH/USD价格
-     * @return 当前ETH价格（以USD计，包含8位小数）
-     * @dev 使用AggregatorV3Interface与Chainlink预言机交互
-     * @dev 返回的价格是int256类型，需要转换为uint256
-     * @dev 价格数据包含8位小数，例如：2000.00 USD = 200000000000
-     */
-    function getEthPrice() internal view returns (uint256) {
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(ethPriceFeed);
-        (, int256 price, , , ) = priceFeed.latestRoundData();
-        return uint256(price);
-    }
-
-    /**
-     * @dev 获取ERC20代币当前价格
-     * @notice 从Chainlink预言机获取ERC20代币/USD价格
-     * @return 当前ERC20代币价格（以USD计，包含8位小数）
-     * @dev 使用AggregatorV3Interface与Chainlink预言机交互
-     * @dev 返回的价格是int256类型，需要转换为uint256
-     * @dev 价格数据包含8位小数，例如：1.00 USD = 100000000
-     */
-    function getERC20Price() internal view returns (uint256) {
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(erc20PriceFeed);
-        (, int256 price, , , ) = priceFeed.latestRoundData();
-        return uint256(price);
-    }
 
     /**
      * @dev 开始拍卖函数
@@ -269,11 +219,17 @@ contract SingleNFTAuction is
         auction.highestBidder = msg.sender;
         auction.highestBid = msg.value;
 
-        // 使用预言机获取ETH当前价格
-        uint256 ethPrice = getEthPrice();
-        // 将currentHighestBid转换为USD价格
-        uint256 currentHighestBidInUSD = (msg.value * ethPrice) / 10 ** 18;
-        emit BidPlaced(msg.sender, msg.value, currentHighestBidInUSD);
+        // 使用价格预言机计算美元价值
+        uint256 amountInUSD = 0;
+        if (address(priceOracle) != address(0)) {
+            try priceOracle.getETHPrice() returns (uint256 ethPrice, uint256) {
+                amountInUSD = (msg.value * ethPrice) / 10 ** 18;
+            } catch {
+                // 如果价格查询失败，继续执行但美元价值为0
+            }
+        }
+
+        emit BidPlaced(msg.sender, msg.value, amountInUSD);
     }
 
     /**
@@ -331,7 +287,17 @@ contract SingleNFTAuction is
         auction.highestBidder = msg.sender;
         auction.highestBid = amount;
 
-        emit BidPlaced(msg.sender, amount, 0);
+        // 使用价格预言机计算美元价值
+        uint256 amountInUSD = 0;
+        if (address(priceOracle) != address(0)) {
+            try priceOracle.getTokenPrice(auction.erc20Token) returns (uint256 tokenPrice, uint256) {
+                amountInUSD = (amount * tokenPrice) / 10 ** 18;
+            } catch {
+                // 如果价格查询失败，继续执行但美元价值为0
+            }
+        }
+
+        emit BidPlaced(msg.sender, amount, amountInUSD);
     }
 
     /**

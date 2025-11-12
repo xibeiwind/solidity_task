@@ -61,6 +61,13 @@ abstract contract NFTAuctionBase is IERC721Receiver {
     }
 
     // 事件定义
+
+    /**
+     * @dev 价格预言机更新事件
+     * @param priceOracle 新的价格预言机地址
+     */
+    event PriceOracleUpdated(address priceOracle);
+    
     /**
      * @dev 拍卖开始事件
      * @notice 当新的拍卖开始时触发

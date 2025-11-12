@@ -20,9 +20,16 @@ describe("SingleNFTAuction", function () {
     await myToken.mint(bidder1.address, 200);
     await myToken.mint(bidder2.address, 500);
 
+    // 部署 MockPriceOracle 合约
+    const MockPriceOracle = await ethers.getContractFactory("MockPriceOracle");
+    const mockPriceOracle = await MockPriceOracle.deploy();
+
     // 部署 SingleNFTAuction 合约
     const SingleNFTAuction = await ethers.getContractFactory("SingleNFTAuction");
     const singleNFTAuction = await SingleNFTAuction.deploy();
+
+    // 初始化 SingleNFTAuction 合约
+    await singleNFTAuction.initialize(await mockPriceOracle.getAddress());
 
     // 铸造一些 NFT 给卖家用于测试
     const tokenURI = "https://example.com/token/1";
@@ -32,6 +39,7 @@ describe("SingleNFTAuction", function () {
       singleNFTAuction,
       myNFT,
       myToken,
+      mockPriceOracle,
       owner,
       seller,
       bidder1,
@@ -52,6 +60,143 @@ describe("SingleNFTAuction", function () {
 
       const auction = await singleNFTAuction.getAuction();
       expect(auction.status).to.equal(0); // NotStarted
+    });
+
+    it("应该正确设置价格预言机", async function () {
+      const { singleNFTAuction, mockPriceOracle } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      expect(await singleNFTAuction.priceOracle()).to.equal(await mockPriceOracle.getAddress());
+    });
+  });
+
+  describe("价格预言机", function () {
+    it("应该能够设置价格预言机", async function () {
+      const { singleNFTAuction, owner } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      // 部署新的 MockPriceOracle
+      const MockPriceOracle = await ethers.getContractFactory("MockPriceOracle");
+      const newMockPriceOracle = await MockPriceOracle.deploy();
+
+      // 设置新的价格预言机
+      await expect(singleNFTAuction.connect(owner).setPriceOracle(await newMockPriceOracle.getAddress()))
+        .to.emit(singleNFTAuction, "PriceOracleUpdated")
+        .withArgs(await newMockPriceOracle.getAddress());
+
+      // 验证价格预言机已更新
+      expect(await singleNFTAuction.priceOracle()).to.equal(await newMockPriceOracle.getAddress());
+    });
+
+    it("非所有者不能设置价格预言机", async function () {
+      const { singleNFTAuction, otherAccount } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      // 部署新的 MockPriceOracle
+      const MockPriceOracle = await ethers.getContractFactory("MockPriceOracle");
+      const newMockPriceOracle = await MockPriceOracle.deploy();
+
+      // 非所有者尝试设置价格预言机应该失败
+      await expect(
+        singleNFTAuction.connect(otherAccount).setPriceOracle(await newMockPriceOracle.getAddress())
+      ).to.be.revertedWithCustomError(singleNFTAuction, "OwnableUnauthorizedAccount");
+    });
+
+    it("不能设置无效的价格预言机地址", async function () {
+      const { singleNFTAuction, owner } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      // 尝试设置零地址应该失败
+      await expect(
+        singleNFTAuction.connect(owner).setPriceOracle(ethers.ZeroAddress)
+      ).to.be.revertedWith("Invalid price oracle address");
+    });
+
+    it("ETH 出价应该计算美元价值", async function () {
+      const { singleNFTAuction, myNFT, seller, bidder1, mockPriceOracle } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+      const bidAmount = ethers.parseEther("1.5");
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        3600,
+        0,
+        ethers.ZeroAddress
+      );
+
+      // 获取 MockPriceOracle 的 ETH 价格
+      const [ethPrice] = await mockPriceOracle.getETHPrice();
+
+      // 计算预期的美元价值
+      const expectedUSDValue = (bidAmount * ethPrice) / 10n ** 18n;
+
+      // 出价并验证美元价值
+      await expect(singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount }))
+        .to.emit(singleNFTAuction, "BidPlaced")
+        .withArgs(bidder1.address, bidAmount, expectedUSDValue);
+    });
+
+    it("ERC20 出价应该计算美元价值", async function () {
+      const { singleNFTAuction, myNFT, myToken, seller, bidder1, mockPriceOracle } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = 100;
+      const bidAmount = 150;
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        3600,
+        1,
+        await myToken.getAddress()
+      );
+
+      // 授权代币
+      await myToken.connect(bidder1).approve(await singleNFTAuction.getAddress(), bidAmount);
+
+      // 获取 MockPriceOracle 的代币价格
+      const [tokenPrice] = await mockPriceOracle.getTokenPrice(await myToken.getAddress());
+
+      // 计算预期的美元价值
+      const expectedUSDValue = (BigInt(bidAmount) * tokenPrice) / 10n ** 18n;
+
+      // 出价并验证美元价值
+      await expect(singleNFTAuction.connect(bidder1).placeBidERC20(bidAmount))
+        .to.emit(singleNFTAuction, "BidPlaced")
+        .withArgs(bidder1.address, bidAmount, expectedUSDValue);
+    });
+
+    it("不可设置价格预言机为ZeroAddress", async function () {
+      const { singleNFTAuction, myNFT, seller, bidder1, owner } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        3600,
+        0,
+        ethers.ZeroAddress
+      );
+
+      // 不可设置价格预言机为ZeroAddress
+      await expect(
+        singleNFTAuction.connect(owner).setPriceOracle(ethers.ZeroAddress)
+      ).to.be.revertedWith("Invalid price oracle address");
+
+      // // 出价并验证美元价值为0
+      // await expect(singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount }))
+      //   .to.emit(singleNFTAuction, "BidPlaced")
+      //   .withArgs(bidder1.address, bidAmount, 0);
     });
   });
 
@@ -258,10 +403,11 @@ describe("SingleNFTAuction", function () {
 
   describe("ETH 出价", function () {
     it("应该能够使用 ETH 出价", async function () {
-      const { singleNFTAuction, myNFT, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
+      const { singleNFTAuction, myNFT, seller, bidder1, mockPriceOracle } = await loadFixture(deploySingleNFTAuctionFixture);
 
       const startingPrice = ethers.parseEther("1");
       const bidAmount = ethers.parseEther("1.5");
+
 
       // 创建拍卖
       await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
@@ -274,12 +420,13 @@ describe("SingleNFTAuction", function () {
         0, // ETH
         ethers.ZeroAddress
       );
-
+      const ethPrice = await mockPriceOracle.getETHPrice();
+      const priceInUSD = (bidAmount * ethPrice.price) / BigInt(1e18);
       // 出价
       await expect(
         singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount })
       ).to.emit(singleNFTAuction, "BidPlaced")
-        .withArgs(bidder1.address, bidAmount);
+        .withArgs(bidder1.address, bidAmount, priceInUSD);
 
       // 验证拍卖信息更新
       const auction = await singleNFTAuction.getAuction();
@@ -379,10 +526,10 @@ describe("SingleNFTAuction", function () {
 
   describe("ERC20 出价", function () {
     it("应该能够使用 ERC20 出价", async function () {
-      const { singleNFTAuction, myNFT, myToken, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
+      const { singleNFTAuction, mockPriceOracle, myNFT, myToken, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
 
       const startingPrice = 100;
-      const bidAmount = 150;
+      const bidAmount = BigInt(150);
 
       // 创建拍卖
       await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
@@ -399,11 +546,13 @@ describe("SingleNFTAuction", function () {
       // 授权代币给拍卖合约
       await myToken.connect(bidder1).approve(await singleNFTAuction.getAddress(), bidAmount);
 
+      const tokenPrice = await mockPriceOracle.getTokenPrice(myToken.getAddress());
+      const priceInUSD = (bidAmount * tokenPrice.price) / BigInt(1e18);
       // 出价
       await expect(
         singleNFTAuction.connect(bidder1).placeBidERC20(bidAmount)
       ).to.emit(singleNFTAuction, "BidPlaced")
-        .withArgs(bidder1.address, bidAmount);
+        .withArgs(bidder1.address, bidAmount, priceInUSD);
 
       // 验证拍卖信息更新
       const auction = await singleNFTAuction.getAuction();
@@ -592,7 +741,7 @@ describe("SingleNFTAuction", function () {
     it("应该能够提取 ERC20 代币", async function () {
       const { singleNFTAuction, myNFT, myToken, seller, bidder1, bidder2 } = await loadFixture(deploySingleNFTAuctionFixture);
 
-      const startingPrice =BigInt("100");
+      const startingPrice = BigInt("100");
       const bid1Amount = BigInt("150");
       const bid2Amount = BigInt("200");
 
