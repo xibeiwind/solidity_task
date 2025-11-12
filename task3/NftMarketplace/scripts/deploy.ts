@@ -10,13 +10,15 @@ async function main() {
     const blockNumber = await provider.getBlockNumber();
     console.log("当前网络的区块高度：", blockNumber);
 
-    const contracts=["MyToken", "MyNFT", "NFTAuction"];
+    const contracts=["MyToken", "MyNFT", "NFTAuction", "SingleNFTAuction"];
     
     for (const contractName of contracts) { 
       const contract = await ethers.deployContract(contractName);
       await contract.waitForDeployment();
-      console.log(`${contract} deployed to ${contract.target}`);
+      
+      console.log(`${contractName} deployed to ${contract.target}`);
     }
+
 }
 
 main().catch((error) => {

@@ -3,8 +3,17 @@
 pragma solidity ^0.8.22;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {
+    ERC20Permit
+} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 
 contract MyToken is ERC20, ERC20Permit {
-    constructor() ERC20("MyToken", "MTK") ERC20Permit("MyToken") {}
+    address private owner;
+    constructor() ERC20("MyToken", "MTK") ERC20Permit("MyToken") {
+        owner = msg.sender;
+    }
+    function mint(address to, uint256 amount) public {
+        require(msg.sender == owner, "Only owner can mint");
+        _mint(to, amount);
+    }
 }
