@@ -837,4 +837,503 @@ describe("SingleNFTAuction", function () {
       expect(await singleNFTAuction.getPendingReturns(bidder1.address)).to.equal(0);
     });
   });
+
+  describe("拍卖结束后资金领取", function () {
+    it("卖家应该能够领取ETH拍卖资金", async function () {
+      const { singleNFTAuction, myNFT, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+      const bidAmount = ethers.parseEther("1.5");
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        5, // 短时间便于测试
+        0, // ETH
+        ethers.ZeroAddress
+      );
+
+      // 出价
+      await singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount });
+
+      // 等待拍卖结束
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      // 结束拍卖
+      await singleNFTAuction.endAuction();
+
+      // 卖家领取资金
+      const initialBalance = await ethers.provider.getBalance(seller.address);
+      const tx = await singleNFTAuction.connect(seller).sellerClaimFunds();
+      const receipt = await tx.wait();
+      const gasUsed = receipt!.gasUsed * receipt!.gasPrice;
+      const finalBalance = await ethers.provider.getBalance(seller.address);
+
+      // 验证卖家收到资金（减去gas费用）
+      expect(finalBalance).to.be.closeTo(initialBalance + bidAmount - gasUsed, ethers.parseEther("0.001"));
+
+      // 验证卖家已领取标记
+      const auction = await singleNFTAuction.getAuction();
+      expect(auction.sellerClaimed).to.be.true;
+    });
+
+    it("卖家应该能够领取ERC20拍卖资金", async function () {
+      const { singleNFTAuction, myNFT, myToken, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = 100;
+      const bidAmount = 150;
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        5, // 短时间便于测试
+        1, // ERC20
+        await myToken.getAddress()
+      );
+
+      // 出价
+      await myToken.connect(bidder1).approve(await singleNFTAuction.getAddress(), bidAmount);
+      await singleNFTAuction.connect(bidder1).placeBidERC20(bidAmount);
+
+      // 等待拍卖结束
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      // 结束拍卖
+      await singleNFTAuction.endAuction();
+
+      // 卖家领取资金
+      const initialBalance = await myToken.balanceOf(seller.address);
+      await singleNFTAuction.connect(seller).sellerClaimFunds();
+      const finalBalance = await myToken.balanceOf(seller.address);
+
+      // 验证卖家收到代币
+      expect(finalBalance).to.equal(initialBalance + BigInt(bidAmount));
+
+      // 验证卖家已领取标记
+      const auction = await singleNFTAuction.getAuction();
+      expect(auction.sellerClaimed).to.be.true;
+    });
+
+    it("未达到保留价格时NFT应该退回给卖家", async function () {
+      const { singleNFTAuction, myNFT, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+      const reservePrice = ethers.parseEther("2"); // 保留价高于出价
+      const bidAmount = ethers.parseEther("1.5");
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        reservePrice,
+        5, // 短时间便于测试
+        0, // ETH
+        ethers.ZeroAddress
+      );
+
+      // 出价（低于保留价）
+      await singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount });
+
+      // 等待拍卖结束
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      // 结束拍卖
+      await singleNFTAuction.endAuction();
+
+      // 卖家领取资金（应该退回NFT）
+      await singleNFTAuction.connect(seller).sellerClaimFunds();
+
+      // 验证NFT已退回给卖家
+      expect(await myNFT.ownerOf(0)).to.equal(seller.address);
+    });
+
+    it("最高出价者应该能够领取NFT", async function () {
+      const { singleNFTAuction, myNFT, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+      const bidAmount = ethers.parseEther("1.5");
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        5, // 短时间便于测试
+        0, // ETH
+        ethers.ZeroAddress
+      );
+
+      // 出价
+      await singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount });
+
+      // 等待拍卖结束
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      // 结束拍卖
+      await singleNFTAuction.endAuction();
+
+      // 卖家领取资金
+      await singleNFTAuction.connect(seller).sellerClaimFunds();
+
+      // 最高出价者领取NFT
+      await singleNFTAuction.connect(bidder1).highestBidderClaimNFT();
+
+      // 验证NFT已转移给最高出价者
+      expect(await myNFT.ownerOf(0)).to.equal(bidder1.address);
+
+      // 验证最高出价者已领取标记
+      const auction = await singleNFTAuction.getAuction();
+      expect(auction.highestBidderClaimed).to.be.true;
+    });
+
+    it("非卖家不能领取资金", async function () {
+      const { singleNFTAuction, myNFT, seller, bidder1, otherAccount } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+      const bidAmount = ethers.parseEther("1.5");
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        5, // 短时间便于测试
+        0, // ETH
+        ethers.ZeroAddress
+      );
+
+      // 出价
+      await singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount });
+
+      // 等待拍卖结束
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      // 结束拍卖
+      await singleNFTAuction.endAuction();
+
+      // 非卖家尝试领取资金应该失败
+      await expect(
+        singleNFTAuction.connect(otherAccount).sellerClaimFunds()
+      ).to.be.revertedWith("Only seller can claim");
+    });
+
+    it("非最高出价者不能领取NFT", async function () {
+      const { singleNFTAuction, myNFT, seller, bidder1, otherAccount } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+      const bidAmount = ethers.parseEther("1.5");
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        5, // 短时间便于测试
+        0, // ETH
+        ethers.ZeroAddress
+      );
+
+      // 出价
+      await singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount });
+
+      // 等待拍卖结束
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      // 结束拍卖
+      await singleNFTAuction.endAuction();
+
+      // 卖家领取资金
+      await singleNFTAuction.connect(seller).sellerClaimFunds();
+
+      // 非最高出价者尝试领取NFT应该失败
+      await expect(
+        singleNFTAuction.connect(otherAccount).highestBidderClaimNFT()
+      ).to.be.revertedWith("Only highest bidder can claim");
+    });
+  });
+
+  describe("紧急提款功能", function () {
+    it("所有者应该能够执行紧急提款", async function () {
+      const { singleNFTAuction, myNFT, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+      const bidAmount = ethers.parseEther("1.5");
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        5, // 短时间便于测试
+        0, // ETH
+        ethers.ZeroAddress
+      );
+
+      // 出价
+      await singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount });
+
+      // 等待拍卖结束
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      // 结束拍卖
+      await singleNFTAuction.endAuction();
+
+      // 模拟时间流逝（30天后）
+      await ethers.provider.send("evm_increaseTime", [30 * 24 * 3600 + 1]);
+      await ethers.provider.send("evm_mine", []);
+
+      // 执行紧急提款
+      await singleNFTAuction.emergencyWithdraw();
+
+      // 验证资金已转移给卖家
+      const auction = await singleNFTAuction.getAuction();
+      expect(auction.sellerClaimed).to.be.true;
+    });
+
+    it("非所有者不能执行紧急提款", async function () {
+      const { singleNFTAuction, myNFT, seller, bidder1, otherAccount } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+      const bidAmount = ethers.parseEther("1.5");
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        5, // 短时间便于测试
+        0, // ETH
+        ethers.ZeroAddress
+      );
+
+      // 出价
+      await singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount });
+
+      // 等待拍卖结束
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      // 结束拍卖
+      await singleNFTAuction.endAuction();
+
+      // 模拟时间流逝（30天后）
+      await ethers.provider.send("evm_increaseTime", [30 * 24 * 3600 + 1]);
+      await ethers.provider.send("evm_mine", []);
+
+      // 非所有者尝试紧急提款应该失败
+      await expect(
+        singleNFTAuction.connect(otherAccount).emergencyWithdraw()
+      ).to.be.revertedWithCustomError(singleNFTAuction, "OwnableUnauthorizedAccount");
+    });
+
+    it("紧急提款不能在30天内执行", async function () {
+      const { singleNFTAuction, myNFT, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+      const bidAmount = ethers.parseEther("1.5");
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        5, // 短时间便于测试
+        0, // ETH
+        ethers.ZeroAddress
+      );
+
+      // 出价
+      await singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount });
+
+      // 等待拍卖结束
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      // 结束拍卖
+      await singleNFTAuction.endAuction();
+
+      // 尝试在30天内执行紧急提款应该失败
+      await expect(
+        singleNFTAuction.emergencyWithdraw()
+      ).to.be.revertedWith("Too early for emergency withdrawal");
+    });
+  });
+
+  describe("边界情况测试", function () {
+    it("应该处理零保留价格的情况", async function () {
+      const { singleNFTAuction, myNFT, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+      const bidAmount = ethers.parseEther("1.5");
+
+      // 创建拍卖（零保留价格）
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0, // 零保留价格
+        5, // 短时间便于测试
+        0, // ETH
+        ethers.ZeroAddress
+      );
+
+      // 出价
+      await singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount });
+
+      // 等待拍卖结束
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      // 结束拍卖
+      await singleNFTAuction.endAuction();
+
+      // 卖家领取资金
+      await singleNFTAuction.connect(seller).sellerClaimFunds();
+
+      // 最高出价者领取NFT
+      await singleNFTAuction.connect(bidder1).highestBidderClaimNFT();
+
+      // 验证NFT已转移给最高出价者
+      expect(await myNFT.ownerOf(0)).to.equal(bidder1.address);
+    });
+
+    it("应该处理无出价的情况", async function () {
+      const { singleNFTAuction, myNFT, seller } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        5, // 短时间便于测试
+        0, // ETH
+        ethers.ZeroAddress
+      );
+
+      // 等待拍卖结束（无出价）
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      // 结束拍卖
+      await singleNFTAuction.endAuction();
+
+      // 卖家领取资金（应该退回NFT）
+      await singleNFTAuction.connect(seller).sellerClaimFunds();
+
+      // 验证NFT已退回给卖家
+      expect(await myNFT.ownerOf(0)).to.equal(seller.address);
+    });
+
+    it("应该处理预言机故障的情况", async function () {
+      const { singleNFTAuction, mockPriceOracle, myNFT, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+      const bidAmount = ethers.parseEther("1.5");
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        3600,
+        0, // ETH
+        ethers.ZeroAddress
+      );
+
+      // 设置无效的价格预言机地址
+      await mockPriceOracle.setETHPrice(0 * 1e8);
+      await mockPriceOracle.setTokenPrice(ethers.ZeroAddress, 0 * 1e8);
+
+      // 出价（应该成功，但美元价值为0）
+      await expect(singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount }))
+        .to.emit(singleNFTAuction, "BidPlaced")
+        .withArgs(bidder1.address, bidAmount, 0);
+    });
+
+    it("应该处理极端价格情况", async function () {
+      const { singleNFTAuction, myNFT, seller, bidder1 } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1000"); // 高起拍价
+      const bidAmount = ethers.parseEther("1001"); // 略高于起拍价
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        3600,
+        0, // ETH
+        ethers.ZeroAddress
+      );
+
+      // 出价
+      await singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount });
+
+      // 验证拍卖信息更新
+      const auction = await singleNFTAuction.getAuction();
+      expect(auction.highestBidder).to.equal(bidder1.address);
+      expect(auction.highestBid).to.equal(bidAmount);
+    });
+
+    it("应该处理重复提取的情况", async function () {
+      const { singleNFTAuction, myNFT, seller, bidder1, bidder2 } = await loadFixture(deploySingleNFTAuctionFixture);
+
+      const startingPrice = ethers.parseEther("1");
+
+      // 创建拍卖
+      await myNFT.connect(seller).approve(await singleNFTAuction.getAddress(), 0);
+      await singleNFTAuction.connect(seller).startAuction(
+        await myNFT.getAddress(),
+        0,
+        startingPrice,
+        0,
+        3600,
+        0, // ETH
+        ethers.ZeroAddress
+      );
+
+      // 第一个出价
+      const bid1Amount = ethers.parseEther("1.5");
+      await singleNFTAuction.connect(bidder1).placeBidETH({ value: bid1Amount });
+
+      // 第二个出价（更高）
+      const bid2Amount = ethers.parseEther("2");
+      await singleNFTAuction.connect(bidder2).placeBidETH({ value: bid2Amount });
+
+      // 提取退款
+      await singleNFTAuction.connect(bidder1).withdrawETH();
+
+      // 尝试重复提取应该失败
+      await expect(
+        singleNFTAuction.connect(bidder1).withdrawETH()
+      ).to.be.revertedWith("No pending returns");
+    });
+  });
 });
