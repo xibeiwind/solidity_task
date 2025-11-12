@@ -8,6 +8,9 @@ import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol"; // ERC721接�
 import "@openzeppelin/contracts/access/Ownable.sol"; // 所有权管理
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol"; // 重入攻击防护
 
+// 价格预言机接口
+import "./interfaces/IPriceOracle.sol";
+
 /**
  * @title NFTAuction
  * @dev NFT拍卖合约，支持ETH和ERC20代币支付
@@ -76,6 +79,12 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
      */
     uint256 private _auctionIdCounter;
 
+    /**
+     * @dev 价格预言机合约地址
+     * @notice 用于查询ETH和ERC20代币的美元价格
+     */
+    IPriceOracle public priceOracle;
+
     // 存储映射
     /**
      * @dev 拍卖ID到拍卖信息的映射
@@ -132,11 +141,13 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
      * @param auctionId 拍卖ID
      * @param bidder 出价者地址
      * @param amount 出价金额
+     * @param amountInUSD 出价金额的美元价值（基于预言机价格）
      */
     event BidPlaced(
         uint256 indexed auctionId,
         address bidder,
-        uint256 amount
+        uint256 amount,
+        uint256 amountInUSD
     );
 
     /**
@@ -183,6 +194,17 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
     constructor() Ownable(msg.sender) {
         // 构造函数初始化
         // 当前实现为空，可根据需要添加初始化逻辑
+    }
+
+    /**
+     * @dev 设置价格预言机
+     * @notice 设置用于查询ETH和ERC20代币美元价格的价格预言机合约
+     * @param oracleAddress 价格预言机合约地址
+     * @dev 只有合约所有者可以调用此函数
+     */
+    function setPriceOracle(address oracleAddress) external onlyOwner {
+        require(oracleAddress != address(0), "Invalid oracle address");
+        priceOracle = IPriceOracle(oracleAddress);
     }
 
     /**
@@ -406,7 +428,10 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
         auction.highestBidder = msg.sender;
         auction.highestBid = msg.value;
 
-        emit BidPlaced(auctionId, msg.sender, msg.value);
+        // 计算美元价值
+        uint256 amountInUSD = _calculateUSDValue(msg.value, PaymentToken.ETH, auction.erc20Token);
+
+        emit BidPlaced(auctionId, msg.sender, msg.value, amountInUSD);
     }
 
     /**
@@ -470,7 +495,51 @@ contract NFTAuction is ReentrancyGuard, IERC721Receiver, Ownable {
         auction.highestBidder = msg.sender;
         auction.highestBid = amount;
 
-        emit BidPlaced(auctionId, msg.sender, amount);
+        // 计算美元价值
+        uint256 amountInUSD = _calculateUSDValue(amount, PaymentToken.ERC20, auction.erc20Token);
+
+        emit BidPlaced(auctionId, msg.sender, amount, amountInUSD);
+    }
+
+    /**
+     * @dev 内部函数：计算美元价值
+     * @notice 根据支付币种类型和金额计算美元价值
+     * @param amount 原始金额
+     * @param paymentToken 支付币种类型
+     * @param erc20Token ERC20代币地址（如果使用ERC20支付）
+     * @return 美元价值（8位小数精度）
+     * @dev 如果价格预言机未设置或价格查询失败，返回0
+     */
+    function _calculateUSDValue(
+        uint256 amount,
+        PaymentToken paymentToken,
+        address erc20Token
+    ) internal view returns (uint256) {
+        // 如果价格预言机未设置，返回0
+        if (address(priceOracle) == address(0)) {
+            return 0;
+        }
+
+        try priceOracle.getETHPrice() returns (uint256 ethPrice, uint256) {
+            if (paymentToken == PaymentToken.ETH) {
+                // ETH美元价值计算：amount * ethPrice / 1e18
+                // ethPrice是8位小数，amount是18位小数，结果应该是8位小数
+                return (amount * ethPrice) / 1e18;
+            } else if (paymentToken == PaymentToken.ERC20) {
+                // ERC20代币美元价值计算
+                try priceOracle.getTokenPrice(erc20Token) returns (uint256 tokenPrice, uint256) {
+                    // tokenPrice是8位小数，amount是代币单位，结果应该是8位小数
+                    // 假设代币有18位小数
+                    return (amount * tokenPrice) / 1e18;
+                } catch {
+                    return 0;
+                }
+            }
+        } catch {
+            return 0;
+        }
+
+        return 0;
     }
 
     /**
