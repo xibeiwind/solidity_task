@@ -21,6 +21,7 @@ contract NFTAuctionFactory is
     // 映射：拍卖地址 => 是否由本工厂创建
     mapping(address => bool) public isAuctionCreatedByFactory;
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
@@ -69,19 +70,19 @@ contract NFTAuctionFactory is
 
         // 部署SingleNFTAuction实现合约
         SingleNFTAuction implementation = new SingleNFTAuction();
-        
+
         // 部署UUPS代理合约
         bytes memory initData = abi.encodeWithSelector(
             SingleNFTAuction.initialize.selector,
-            seller,  // initialOwner 设置为卖家
-            address(0)  // priceOracle 初始化为0地址，后续可以设置
+            seller, // initialOwner 设置为卖家
+            address(0) // priceOracle 初始化为0地址，后续可以设置
         );
-        
+
         ERC1967Proxy proxy = new ERC1967Proxy(
             address(implementation),
             initData
         );
-        
+
         address auctionAddress = address(proxy);
 
         // 将新拍卖合约添加到列表

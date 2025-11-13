@@ -29,38 +29,55 @@ async function main() {
   console.log("当前网络的区块高度：", blockNumber);
   contractStartupData.blockNumber = blockNumber;
 
-  // deploy MyToken
   {
+    // deploy MyToken
     const contract = await ethers.deployContract("MyToken");
     await contract.waitForDeployment();
-    console.log(`MyToken 部署到了 ${contract.target}`);
+    // 显示部署信息 `区块  gas  合约地址   合约名称`
+    const tx = contract.deploymentTransaction();
+    if (tx) {
+      const { gasLimit, } = tx;
+      console.log(`${gasLimit}\t${contract.target}\tMyToken`);
+    }
     contractStartupData.myToken = contract.target;
   }
-  // deploy MyNFT
   {
+    // deploy MyNFT
     const contract = await ethers.deployContract("MyNFT");
-    const nft = await contract.waitForDeployment();
-    // 显示部署gas
-    console.log(`MyNFT 部署gas: ${nft.deploymentTransaction()?.gasLimit}`);
-    console.log(`MyNFT 部署到了 ${contract.target}`);
+
+    // 显示部署信息 `区块  gas  合约地址   合约名称`
+    const tx = contract.deploymentTransaction();
+    if (tx) {
+      const { gasLimit, } = tx;
+      console.log(`${gasLimit}\t${contract.target}\tMyNFT`);
+    }
     contractStartupData.myNFT = contract.target;
   }
-  // deploy PriceOracle with ethPriceFeed as argument
   {
+    // deploy PriceOracle with ethPriceFeed as argument
     const ethPriceFeed = process.env.ETH_PRICE_FEED;
     const contract = await ethers.deployContract("ChainlinkPriceOracle", [ethPriceFeed]);
     await contract.waitForDeployment();
-    console.log(`ChainlinkPriceOracle 部署到了 ${contract.target}`);
+    // 显示部署信息 `区块  gas  合约地址   合约名称`
+    const tx = contract.deploymentTransaction();
+    if (tx) {
+      const { gasLimit, } = tx;
+      console.log(`${gasLimit}\t${contract.target}\tChainlinkPriceOracle`);
+    }
     contractStartupData.priceOracle = contract.target;
   }
-  // deploy NFTAuctionFactory in UUPS Proxy mode
   {
-
+    // deploy NFTAuctionFactory in UUPS Proxy mode
     const contract = await ethers.getContractFactory("NFTAuctionFactory");
-    const nftAuctionFactory = await upgrades.deployProxy(contract, [deployer.address, deployer.address,]);
-    await nftAuctionFactory.waitForDeployment();
-    console.log(`NFTAuctionFactory 部署到了 ${nftAuctionFactory.target}`);
-    contractStartupData.nftAuctionFactory = nftAuctionFactory.target;
+    const proxy = await upgrades.deployProxy(contract, [deployer.address, deployer.address,]);
+    await proxy.waitForDeployment();
+    // 显示部署信息 `区块  gas  合约地址   合约名称`
+    const tx = proxy.deploymentTransaction();
+    if (tx) {
+      const { gasLimit, } = tx;
+      console.log(`${gasLimit}\t${proxy.target}\tNFTAuctionFactory`);
+    }
+    contractStartupData.nftAuctionFactory = proxy.target;
   }
   console.log(JSON.stringify(contractStartupData));
 }
