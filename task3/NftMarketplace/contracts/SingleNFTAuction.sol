@@ -7,8 +7,8 @@ import "@openzeppelin/contracts/token/ERC721/IERC721.sol"; // ERC721 NFT接口
 import "@openzeppelin/contracts/access/Ownable.sol"; // 所有权管理
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol"; // 重入攻击防护
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol"; // 可升级合约支持
-import "./NFTAuctionBase.sol";
 import "./interfaces/IPriceOracle.sol";
+import "./interfaces/INFTAuction.sol";
 /**
  * @title SingleNFTAuction
  * @dev 单个NFT拍卖合约，支持ETH和ERC20代币支付
@@ -21,7 +21,7 @@ import "./interfaces/IPriceOracle.sol";
  * @dev 使用Initializable支持可升级合约模式
  */
 contract SingleNFTAuction is
-    NFTAuctionBase,
+    INFTAuction,
     ReentrancyGuard,
     Ownable,
     Initializable
@@ -50,6 +50,15 @@ contract SingleNFTAuction is
      * @notice 存储用户可提取的ERC20代币资金
      */
     mapping(address => mapping(address => uint256)) public pendingTokenReturns;
+
+    function onERC721Received(
+        address operator,
+        address from,
+        uint256 tokenId,
+        bytes calldata data
+    ) external pure returns (bytes4) {
+        return IERC721Receiver.onERC721Received.selector;
+    }
 
     /**
      * @dev 构造函数
