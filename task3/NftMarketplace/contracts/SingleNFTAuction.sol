@@ -4,24 +4,16 @@ pragma solidity ^0.8.27;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol"; // ERC20代币接口
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol"; // ERC721 NFT接口
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol"; // 重入攻击防护
-
-import {
-    Initializable
-} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {
-    OwnableUpgradeable
-} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import {
-    UUPSUpgradeable
-} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 
 import "./interfaces/IPriceOracle.sol";
 import "./interfaces/INFTAuction.sol";
 
 contract SingleNFTAuction is
     INFTAuction,
-    ReentrancyGuard,
-    Initializable,
+    ReentrancyGuardUpgradeable,
     OwnableUpgradeable,
     UUPSUpgradeable
 {
@@ -61,17 +53,18 @@ contract SingleNFTAuction is
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
-        // 初始化拍卖状态为未开始
-        auction.status = AuctionStatus.NotStarted;
     }
 
     function initialize(
         address initialOwner,
         address _priceOracle
     ) public initializer {
+        __ReentrancyGuard_init();
         __Ownable_init(initialOwner);
         require(_priceOracle != address(0), "Invalid price oracle address");
         priceOracle = IPriceOracle(_priceOracle);
+        // 初始化拍卖状态为未开始
+        auction.status = AuctionStatus.NotStarted;
     }
 
     function _authorizeUpgrade(

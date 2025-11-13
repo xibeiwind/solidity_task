@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "scripts": {
     "deploy:sepolia": "npx hardhat run --network sepolia scripts/deploy.ts",
+    "deploy:uups": "npx hardhat run scripts/deploy-uups-working.ts",
+    "deploy:uups:sepolia": "npx hardhat run --network sepolia scripts/deploy-uups-working.ts",
     "test": "npx hardhat test --no-compile",
     "compile": "npx hardhat compile --force"
   },
@@ -18,6 +20,7 @@
     "@nomiclabs/hardhat-ethers": "^2.2.3",
     "@openzeppelin/contracts": "^5.4.0",
     "@openzeppelin/contracts-upgradeable": "^5.4.0",
+    "@openzeppelin/hardhat-upgrades": "^3.9.1",
     "@typechain/ethers-v6": "^0.5.1",
     "@typechain/hardhat": "^9.1.0",
     "@types/chai": "^4.3.20",

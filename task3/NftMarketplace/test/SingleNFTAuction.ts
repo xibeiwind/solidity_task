@@ -1,6 +1,6 @@
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, upgrades } from "hardhat";
 
 describe("SingleNFTAuction", function () {
   // 定义测试Fixture，用于在每个测试中复用相同的部署设置
@@ -24,12 +24,10 @@ describe("SingleNFTAuction", function () {
     const MockPriceOracle = await ethers.getContractFactory("MockPriceOracle");
     const mockPriceOracle = await MockPriceOracle.deploy();
 
-    // 部署 SingleNFTAuction 合约
+    // 部署 SingleNFTAuction 合约（可升级合约）
     const SingleNFTAuction = await ethers.getContractFactory("SingleNFTAuction");
-    const singleNFTAuction = await SingleNFTAuction.deploy();
-
-    // 初始化 SingleNFTAuction 合约
-    await singleNFTAuction.initialize(owner.address, await mockPriceOracle.getAddress());
+    const singleNFTAuction = await upgrades.deployProxy(SingleNFTAuction, [owner.address, await mockPriceOracle.getAddress()]);
+    await singleNFTAuction.waitForDeployment();
 
     // 铸造一些 NFT 给卖家用于测试
     const tokenURI = "https://example.com/token/1";
@@ -71,16 +69,16 @@ describe("SingleNFTAuction", function () {
     it("构造函数应该禁用初始化器", async function () {
       const SingleNFTAuction = await ethers.getContractFactory("SingleNFTAuction");
       const singleNFTAuction = await SingleNFTAuction.deploy();
-      
+
       // 验证合约已部署
       expect(await singleNFTAuction.getAddress()).to.be.properAddress;
     });
 
     it("应该支持ERC721接收", async function () {
       const { singleNFTAuction } = await loadFixture(deploySingleNFTAuctionFixture);
-      
+
       // 验证合约支持ERC721接收
-      const selector = await singleNFTAuction.onERC721Received.staticCall(
+      const selector = await singleNFTAuction.onERC721Received(
         ethers.ZeroAddress,
         ethers.ZeroAddress,
         0,
