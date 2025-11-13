@@ -3,3 +3,4 @@ artifacts
 .prettierrc.json
 */.deps/npm/*
 task3/NftMarketplace/yarn.lock
+task3/NftMarketplace/.openzeppelin/sepolia.json

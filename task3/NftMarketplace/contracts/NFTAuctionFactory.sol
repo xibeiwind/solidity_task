@@ -21,7 +21,7 @@ contract NFTAuctionFactory is
     // 映射：拍卖地址 => 是否由本工厂创建
     mapping(address => bool) public isAuctionCreatedByFactory;
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
+ /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
@@ -41,63 +41,39 @@ contract NFTAuctionFactory is
 
     /**
      * @dev 创建新的NFT拍卖合约（UUPS可升级版本）
-     * @param nftContract NFT合约地址
      * @param seller 卖家地址
-     * @param tokenId NFT token ID
-     * @param startingPrice 起拍价格
-     * @param reservePrice 保留价格
-     * @param duration 拍卖持续时间（秒）
      * @return auctionAddress 新创建的拍卖合约地址
      */
     function createAuction(
-        address nftContract,
-        address seller,
-        uint256 tokenId,
-        uint256 startingPrice,
-        uint256 reservePrice,
-        uint256 duration
+        address seller
     ) external returns (address) {
-        require(
-            nftContract != address(0),
-            "NFTAuctionFactory: nftContract is zero address"
-        );
-        require(
-            seller != address(0),
-            "NFTAuctionFactory: seller is zero address"
-        );
-        require(startingPrice > 0, "NFTAuctionFactory: startingPrice is zero");
-        require(duration > 0, "NFTAuctionFactory: duration is zero");
-
+ 
         // 部署SingleNFTAuction实现合约
         SingleNFTAuction implementation = new SingleNFTAuction();
-
+        
         // 部署UUPS代理合约
         bytes memory initData = abi.encodeWithSelector(
             SingleNFTAuction.initialize.selector,
-            seller, // initialOwner 设置为卖家
-            address(0) // priceOracle 初始化为0地址，后续可以设置
+            seller,  // initialOwner 设置为卖家
+            address(0)  // priceOracle 初始化为0地址，后续可以设置
         );
-
+        
         ERC1967Proxy proxy = new ERC1967Proxy(
             address(implementation),
             initData
         );
-
+        
         address auctionAddress = address(proxy);
 
         // 将新拍卖合约添加到列表
         allAuctions.push(auctionAddress);
         isAuctionCreatedByFactory[auctionAddress] = true;
 
+
         // 触发拍卖创建事件
         emit AuctionCreated(
             auctionAddress,
-            nftContract,
-            seller,
-            tokenId,
-            startingPrice,
-            reservePrice,
-            duration
+            seller
         );
 
         return auctionAddress;

@@ -6,27 +6,22 @@ import { SingleNFTAuction } from "../typechain-types/contracts/SingleNFTAuction"
 describe("NFTAuctionFactory", function () {
   // 定义测试Fixture，用于在每个测试中复用相同的部署设置
   async function deployNFTAuctionFactoryFixture() {
-    // 获取测试账户
     const [owner, seller, bidder1, bidder2, otherAccount] = await ethers.getSigners();
 
-    // 部署 MyNFT 合约
+    // 部署合约
     const MyNFT = await ethers.getContractFactory("MyNFT");
     const myNFT = await MyNFT.deploy();
 
-    // 部署 MyToken 合约
     const MyToken = await ethers.getContractFactory("MyToken");
     const myToken = await MyToken.deploy();
 
-    // 部署 MockPriceOracle 合约
     const MockPriceOracle = await ethers.getContractFactory("MockPriceOracle");
     const mockPriceOracle = await MockPriceOracle.deploy();
 
-    // 部署 NFTAuctionFactory 合约
     const NFTAuctionFactory = await ethers.getContractFactory("NFTAuctionFactory");
     const nftAuctionFactory = await upgrades.deployProxy(NFTAuctionFactory, [owner.address, owner.address]);
-    // await NFTAuctionFactory.deploy(owner.address);
 
-    // 铸造一些 NFT 给卖家用于测试
+    // 铸造 NFT 给卖家用于测试
     const tokenURI = "https://example.com/token/1";
     await myNFT.safeMint(seller.address, tokenURI);
 
@@ -41,6 +36,15 @@ describe("NFTAuctionFactory", function () {
       bidder2,
       otherAccount
     };
+  }
+
+  // 辅助函数：从交易收据中提取拍卖地址
+  async function getAuctionAddressFromEvent(nftAuctionFactory: any, receipt: any): Promise<string> {
+    const event = receipt!.logs.find((log: any) =>
+      log.topics[0] === nftAuctionFactory.interface.getEvent("AuctionCreated").topicHash
+    );
+    const decodedEvent = nftAuctionFactory.interface.parseLog(event!);
+    return decodedEvent!.args.auctionAddress;
   }
 
   describe("部署", function () {
@@ -65,139 +69,36 @@ describe("NFTAuctionFactory", function () {
 
   describe("创建拍卖", function () {
     it("应该能够创建新的拍卖合约", async function () {
-      const { nftAuctionFactory, myNFT, seller } = await loadFixture(deployNFTAuctionFactoryFixture);
+      const { nftAuctionFactory, seller } = await loadFixture(deployNFTAuctionFactoryFixture);
 
-      const startingPrice = ethers.parseEther("1");
-      const reservePrice = ethers.parseEther("2");
-      const duration = 3600; // 1小时
-
-      // 创建拍卖
-      await expect(
-        nftAuctionFactory.createAuction(
-          await myNFT.getAddress(),
-          seller.address,
-          0,
-          startingPrice,
-          reservePrice,
-          duration
-        )
-      ).to.emit(nftAuctionFactory, "AuctionCreated");
+      // 创建拍卖并验证事件
+      await expect(nftAuctionFactory.createAuction(seller.address))
+        .to.emit(nftAuctionFactory, "AuctionCreated");
 
       // 验证拍卖列表更新
       expect(await nftAuctionFactory.allAuctionsLength()).to.equal(1);
     });
 
     it("创建的拍卖合约应该被工厂识别", async function () {
-      const { nftAuctionFactory, myNFT, seller } = await loadFixture(deployNFTAuctionFactoryFixture);
-
-      const startingPrice = ethers.parseEther("1");
-      const reservePrice = ethers.parseEther("2");
-      const duration = 3600;
+      const { nftAuctionFactory, seller } = await loadFixture(deployNFTAuctionFactoryFixture);
 
       // 创建拍卖
-      const tx = await nftAuctionFactory.createAuction(
-        await myNFT.getAddress(),
-        seller.address,
-        0,
-        startingPrice,
-        reservePrice,
-        duration
-      );
+      const tx = await nftAuctionFactory.createAuction(seller.address);
       const receipt = await tx.wait();
 
       // 从事件中获取拍卖地址
-      const event = receipt!.logs.find(log =>
-        log.topics[0] === nftAuctionFactory.interface.getEvent("AuctionCreated").topicHash
-      );
-      const decodedEvent = nftAuctionFactory.interface.parseLog(event!);
-      const auctionAddress = decodedEvent!.args.auctionAddress;
+      const auctionAddress = await getAuctionAddressFromEvent(nftAuctionFactory, receipt);
 
       // 验证工厂识别该拍卖
       expect(await nftAuctionFactory.isFactoryAuction(auctionAddress)).to.be.true;
     });
 
-    it("无效参数应该导致创建拍卖失败", async function () {
-      const { nftAuctionFactory, myNFT, seller } = await loadFixture(deployNFTAuctionFactoryFixture);
-
-      const startingPrice = ethers.parseEther("1");
-      const reservePrice = ethers.parseEther("2");
-      const duration = 3600;
-
-      // 无效 NFT 合约地址
-      await expect(
-        nftAuctionFactory.createAuction(
-          ethers.ZeroAddress,
-          seller.address,
-          0,
-          startingPrice,
-          reservePrice,
-          duration
-        )
-      ).to.be.revertedWith("NFTAuctionFactory: nftContract is zero address");
-
-      // 无效卖家地址
-      await expect(
-        nftAuctionFactory.createAuction(
-          await myNFT.getAddress(),
-          ethers.ZeroAddress,
-          0,
-          startingPrice,
-          reservePrice,
-          duration
-        )
-      ).to.be.revertedWith("NFTAuctionFactory: seller is zero address");
-
-      // 无效起拍价格
-      await expect(
-        nftAuctionFactory.createAuction(
-          await myNFT.getAddress(),
-          seller.address,
-          0,
-          0,
-          reservePrice,
-          duration
-        )
-      ).to.be.revertedWith("NFTAuctionFactory: startingPrice is zero");
-
-      // 无效持续时间
-      await expect(
-        nftAuctionFactory.createAuction(
-          await myNFT.getAddress(),
-          seller.address,
-          0,
-          startingPrice,
-          reservePrice,
-          0
-        )
-      ).to.be.revertedWith("NFTAuctionFactory: duration is zero");
-    });
-
     it("应该能够创建多个拍卖合约", async function () {
-      const { nftAuctionFactory, myNFT, seller } = await loadFixture(deployNFTAuctionFactoryFixture);
+      const { nftAuctionFactory, seller } = await loadFixture(deployNFTAuctionFactoryFixture);
 
-      const startingPrice = ethers.parseEther("1");
-      const reservePrice = ethers.parseEther("2");
-      const duration = 3600;
-
-      // 创建第一个拍卖
-      await nftAuctionFactory.createAuction(
-        await myNFT.getAddress(),
-        seller.address,
-        0,
-        startingPrice,
-        reservePrice,
-        duration
-      );
-
-      // 创建第二个拍卖
-      await nftAuctionFactory.createAuction(
-        await myNFT.getAddress(),
-        seller.address,
-        0,
-        startingPrice,
-        reservePrice,
-        duration
-      );
+      // 创建多个拍卖
+      await nftAuctionFactory.createAuction(seller.address);
+      await nftAuctionFactory.createAuction(seller.address);
 
       // 验证拍卖列表更新
       expect(await nftAuctionFactory.allAuctionsLength()).to.equal(2);
@@ -244,37 +145,25 @@ describe("NFTAuctionFactory", function () {
 
   describe("集成测试", function () {
     it("通过工厂创建的拍卖应该能够正常工作", async function () {
-      const { nftAuctionFactory, mockPriceOracle, myNFT, myToken, seller, bidder1 } = await loadFixture(deployNFTAuctionFactoryFixture);
+      const { nftAuctionFactory, mockPriceOracle, myNFT, seller, bidder1 } = await loadFixture(deployNFTAuctionFactoryFixture);
 
       const startingPrice = ethers.parseEther("1");
       const reservePrice = ethers.parseEther("2");
       const duration = 3600;
 
       // 创建拍卖
-      const tx = await nftAuctionFactory.createAuction(
-        await myNFT.getAddress(),
-        seller.address,
-        0,
-        startingPrice,
-        reservePrice,
-        duration
-      );
+      const tx = await nftAuctionFactory.createAuction(seller.address);
       const receipt = await tx.wait();
-
-      // 从事件中获取拍卖地址
-      const event = receipt!.logs.find(log =>
-        log.topics[0] === nftAuctionFactory.interface.getEvent("AuctionCreated").topicHash
-      );
-      const decodedEvent = nftAuctionFactory.interface.parseLog(event!);
-      const auctionAddress = decodedEvent!.args.auctionAddress;
+      const auctionAddress = await getAuctionAddressFromEvent(nftAuctionFactory, receipt);
 
       // 获取拍卖合约实例
       const SingleNFTAuction = await ethers.getContractFactory("SingleNFTAuction");
-      // const auction = SingleNFTAuction.attach(auctionAddress) as SingleNFTAuction;
       const auction = SingleNFTAuction.attach(auctionAddress) as SingleNFTAuction;
-      auction.connect(seller).setPriceOracle(await mockPriceOracle.getAddress());
-      // 卖家授权 NFT 给拍卖合约
+      
+      // 配置拍卖
+      await auction.connect(seller).setPriceOracle(await mockPriceOracle.getAddress());
       await myNFT.connect(seller).approve(auctionAddress, 0);
+      
       // 开始拍卖
       await auction.connect(seller).startAuction(
         await myNFT.getAddress(),
@@ -288,15 +177,11 @@ describe("NFTAuctionFactory", function () {
 
       // 出价
       const bidAmount = ethers.parseEther("1.5");
-
-      // 获取 MockPriceOracle 的 ETH 价格
       const [ethPrice] = await mockPriceOracle.getETHPrice();
-
-      // 计算预期的美元价值
       const expectedUSDValue = (bidAmount * ethPrice) / 10n ** 18n;
-      await expect(
-        auction.connect(bidder1).placeBidETH({ value: bidAmount })
-      ).to.emit(auction, "BidPlaced")
+
+      await expect(auction.connect(bidder1).placeBidETH({ value: bidAmount }))
+        .to.emit(auction, "BidPlaced")
         .withArgs(bidder1.address, bidAmount, expectedUSDValue);
 
       // 验证拍卖信息更新
@@ -306,39 +191,12 @@ describe("NFTAuctionFactory", function () {
     });
 
     it("应该能够查询所有创建的拍卖", async function () {
-      const { nftAuctionFactory, myNFT, seller } = await loadFixture(deployNFTAuctionFactoryFixture);
-
-      const startingPrice = ethers.parseEther("1");
-      const reservePrice = ethers.parseEther("2");
-      const duration = 3600;
+      const { nftAuctionFactory, seller } = await loadFixture(deployNFTAuctionFactoryFixture);
 
       // 创建多个拍卖
-      await nftAuctionFactory.createAuction(
-        await myNFT.getAddress(),
-        seller.address,
-        0,
-        startingPrice,
-        reservePrice,
-        duration
-      );
-
-      await nftAuctionFactory.createAuction(
-        await myNFT.getAddress(),
-        seller.address,
-        0,
-        startingPrice,
-        reservePrice,
-        duration
-      );
-
-      await nftAuctionFactory.createAuction(
-        await myNFT.getAddress(),
-        seller.address,
-        0,
-        startingPrice,
-        reservePrice,
-        duration
-      );
+      await nftAuctionFactory.createAuction(seller.address);
+      await nftAuctionFactory.createAuction(seller.address);
+      await nftAuctionFactory.createAuction(seller.address);
 
       // 验证拍卖数量
       expect(await nftAuctionFactory.allAuctionsLength()).to.equal(3);
@@ -360,27 +218,10 @@ describe("NFTAuctionFactory", function () {
     it("应该正确识别工厂创建的拍卖", async function () {
       const { nftAuctionFactory, myNFT, seller } = await loadFixture(deployNFTAuctionFactoryFixture);
 
-      const startingPrice = ethers.parseEther("1");
-      const reservePrice = ethers.parseEther("2");
-      const duration = 3600;
-
       // 创建拍卖
-      const tx = await nftAuctionFactory.createAuction(
-        await myNFT.getAddress(),
-        seller.address,
-        0,
-        startingPrice,
-        reservePrice,
-        duration
-      );
+      const tx = await nftAuctionFactory.createAuction(seller.address);
       const receipt = await tx.wait();
-
-      // 从事件中获取拍卖地址
-      const event = receipt!.logs.find(log =>
-        log.topics[0] === nftAuctionFactory.interface.getEvent("AuctionCreated").topicHash
-      );
-      const decodedEvent = nftAuctionFactory.interface.parseLog(event!);
-      const auctionAddress = decodedEvent!.args.auctionAddress;
+      const auctionAddress = await getAuctionAddressFromEvent(nftAuctionFactory, receipt);
 
       // 验证工厂识别
       expect(await nftAuctionFactory.isFactoryAuction(auctionAddress)).to.be.true;
