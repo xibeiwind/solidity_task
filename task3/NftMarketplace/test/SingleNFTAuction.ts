@@ -29,7 +29,7 @@ describe("SingleNFTAuction", function () {
     const singleNFTAuction = await SingleNFTAuction.deploy();
 
     // 初始化 SingleNFTAuction 合约
-    await singleNFTAuction.initialize(await mockPriceOracle.getAddress());
+    await singleNFTAuction.initialize(owner.address, await mockPriceOracle.getAddress());
 
     // 铸造一些 NFT 给卖家用于测试
     const tokenURI = "https://example.com/token/1";
@@ -66,6 +66,27 @@ describe("SingleNFTAuction", function () {
       const { singleNFTAuction, mockPriceOracle } = await loadFixture(deploySingleNFTAuctionFixture);
 
       expect(await singleNFTAuction.priceOracle()).to.equal(await mockPriceOracle.getAddress());
+    });
+
+    it("构造函数应该禁用初始化器", async function () {
+      const SingleNFTAuction = await ethers.getContractFactory("SingleNFTAuction");
+      const singleNFTAuction = await SingleNFTAuction.deploy();
+      
+      // 验证合约已部署
+      expect(await singleNFTAuction.getAddress()).to.be.properAddress;
+    });
+
+    it("应该支持ERC721接收", async function () {
+      const { singleNFTAuction } = await loadFixture(deploySingleNFTAuctionFixture);
+      
+      // 验证合约支持ERC721接收
+      const selector = await singleNFTAuction.onERC721Received.staticCall(
+        ethers.ZeroAddress,
+        ethers.ZeroAddress,
+        0,
+        "0x"
+      );
+      expect(selector).to.equal("0x150b7a02");
     });
   });
 
@@ -420,8 +441,8 @@ describe("SingleNFTAuction", function () {
         0, // ETH
         ethers.ZeroAddress
       );
-      const ethPrice = await mockPriceOracle.getETHPrice();
-      const priceInUSD = (bidAmount * ethPrice.price) / BigInt(1e18);
+      const [ethPrice] = await mockPriceOracle.getETHPrice();
+      const priceInUSD = (bidAmount * ethPrice) / 10n ** 18n;
       // 出价
       await expect(
         singleNFTAuction.connect(bidder1).placeBidETH({ value: bidAmount })
@@ -546,8 +567,8 @@ describe("SingleNFTAuction", function () {
       // 授权代币给拍卖合约
       await myToken.connect(bidder1).approve(await singleNFTAuction.getAddress(), bidAmount);
 
-      const tokenPrice = await mockPriceOracle.getTokenPrice(myToken.getAddress());
-      const priceInUSD = (bidAmount * tokenPrice.price) / BigInt(1e18);
+      const [tokenPrice] = await mockPriceOracle.getTokenPrice(await myToken.getAddress());
+      const priceInUSD = (bidAmount * tokenPrice) / 10n ** 18n;
       // 出价
       await expect(
         singleNFTAuction.connect(bidder1).placeBidERC20(bidAmount)

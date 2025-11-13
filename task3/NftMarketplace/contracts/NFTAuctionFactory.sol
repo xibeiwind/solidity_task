@@ -3,8 +3,21 @@ pragma solidity ^0.8.22;
 
 import "./interfaces/INFTAuctionFactory.sol";
 import "./SingleNFTAuction.sol";
+// import {
+//     Initializable
+// } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {
+    OwnableUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {
+    UUPSUpgradeable
+} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 
-contract NFTAuctionFactory is INFTAuctionFactory {
+contract NFTAuctionFactory is
+    OwnableUpgradeable,
+    UUPSUpgradeable,
+    INFTAuctionFactory
+{
     address public feeTo; // 协议费用接收地址（如果为0地址，表示费用关闭）
     address public feeToSetter; // 有权设置 feeTo 地址的账户
     address[] public allAuctions;
@@ -12,9 +25,22 @@ contract NFTAuctionFactory is INFTAuctionFactory {
     // 映射：拍卖地址 => 是否由本工厂创建
     mapping(address => bool) public isAuctionCreatedByFactory;
 
-    constructor(address _feeToSetter) {
-        feeToSetter = _feeToSetter;
+    constructor() {
+        _disableInitializers();
     }
+
+    function initialize(
+        address initialOwner,
+        address _feeToSetter
+    ) public initializer {
+        __Ownable_init(initialOwner);
+        feeToSetter = _feeToSetter;
+        feeTo = address(0);
+    }
+
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyOwner {}
 
     /**
      * @dev 创建新的NFT拍卖合约
@@ -98,7 +124,9 @@ contract NFTAuctionFactory is INFTAuctionFactory {
      * @param auctionAddress 要检查的拍卖合约地址
      * @return 如果是本工厂创建的返回true，否则返回false
      */
-    function isFactoryAuction(address auctionAddress) external view returns (bool) {
+    function isFactoryAuction(
+        address auctionAddress
+    ) external view returns (bool) {
         return isAuctionCreatedByFactory[auctionAddress];
     }
 }
