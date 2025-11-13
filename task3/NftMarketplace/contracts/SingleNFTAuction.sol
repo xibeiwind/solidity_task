@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/token/ERC721/IERC721.sol"; // ERC721 NFT接口
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol"; // 重入攻击防护
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 import "./interfaces/IPriceOracle.sol";
 import "./interfaces/INFTAuction.sol";
@@ -61,7 +61,6 @@ contract SingleNFTAuction is
     ) public initializer {
         __ReentrancyGuard_init();
         __Ownable_init(initialOwner);
-        require(_priceOracle != address(0), "Invalid price oracle address");
         priceOracle = IPriceOracle(_priceOracle);
         // 初始化拍卖状态为未开始
         auction.status = AuctionStatus.NotStarted;

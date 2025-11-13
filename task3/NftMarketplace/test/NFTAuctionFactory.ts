@@ -1,6 +1,6 @@
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, upgrades } from "hardhat";
 import { SingleNFTAuction } from "../typechain-types/contracts/SingleNFTAuction";
 
 describe("NFTAuctionFactory", function () {
@@ -17,9 +17,14 @@ describe("NFTAuctionFactory", function () {
     const MyToken = await ethers.getContractFactory("MyToken");
     const myToken = await MyToken.deploy();
 
+    // 部署 MockPriceOracle 合约
+    const MockPriceOracle = await ethers.getContractFactory("MockPriceOracle");
+    const mockPriceOracle = await MockPriceOracle.deploy();
+
     // 部署 NFTAuctionFactory 合约
     const NFTAuctionFactory = await ethers.getContractFactory("NFTAuctionFactory");
-    const nftAuctionFactory = await NFTAuctionFactory.deploy(owner.address);
+    const nftAuctionFactory = await upgrades.deployProxy(NFTAuctionFactory, [owner.address, owner.address]);
+    // await NFTAuctionFactory.deploy(owner.address);
 
     // 铸造一些 NFT 给卖家用于测试
     const tokenURI = "https://example.com/token/1";
@@ -27,6 +32,7 @@ describe("NFTAuctionFactory", function () {
 
     return {
       nftAuctionFactory,
+      mockPriceOracle,
       myNFT,
       myToken,
       owner,
@@ -238,7 +244,7 @@ describe("NFTAuctionFactory", function () {
 
   describe("集成测试", function () {
     it("通过工厂创建的拍卖应该能够正常工作", async function () {
-      const { nftAuctionFactory, myNFT, myToken, seller, bidder1 } = await loadFixture(deployNFTAuctionFactoryFixture);
+      const { nftAuctionFactory, mockPriceOracle, myNFT, myToken, seller, bidder1 } = await loadFixture(deployNFTAuctionFactoryFixture);
 
       const startingPrice = ethers.parseEther("1");
       const reservePrice = ethers.parseEther("2");
@@ -266,9 +272,9 @@ describe("NFTAuctionFactory", function () {
       const SingleNFTAuction = await ethers.getContractFactory("SingleNFTAuction");
       // const auction = SingleNFTAuction.attach(auctionAddress) as SingleNFTAuction;
       const auction = SingleNFTAuction.attach(auctionAddress) as SingleNFTAuction;
+      auction.connect(seller).setPriceOracle(await mockPriceOracle.getAddress());
       // 卖家授权 NFT 给拍卖合约
       await myNFT.connect(seller).approve(auctionAddress, 0);
-
       // 开始拍卖
       await auction.connect(seller).startAuction(
         await myNFT.getAddress(),
@@ -282,10 +288,16 @@ describe("NFTAuctionFactory", function () {
 
       // 出价
       const bidAmount = ethers.parseEther("1.5");
+
+      // 获取 MockPriceOracle 的 ETH 价格
+      const [ethPrice] = await mockPriceOracle.getETHPrice();
+
+      // 计算预期的美元价值
+      const expectedUSDValue = (bidAmount * ethPrice) / 10n ** 18n;
       await expect(
         auction.connect(bidder1).placeBidETH({ value: bidAmount })
       ).to.emit(auction, "BidPlaced")
-        .withArgs(bidder1.address, bidAmount);
+        .withArgs(bidder1.address, bidAmount, expectedUSDValue);
 
       // 验证拍卖信息更新
       const auctionInfo = await auction.getAuction();

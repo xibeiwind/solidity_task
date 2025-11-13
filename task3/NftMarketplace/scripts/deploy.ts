@@ -1,24 +1,68 @@
-import { ethers } from "hardhat";
+import { Addressable } from 'ethers';
+import { ethers, upgrades } from "hardhat";
 
-async function main() { 
-      // 获取默认的以太坊提供商
-    const provider = ethers.provider;
-    const network = await provider.getNetwork();
-    console.log( network.toJSON())
-    
-    // 打印当前网络的区块高度
-    const blockNumber = await provider.getBlockNumber();
-    console.log("当前网络的区块高度：", blockNumber);
+interface ContractStartupData {
+  deployer: string;
+  network: string;
+  blockNumber: number;
+  myToken: string | Addressable;
+  myNFT: string | Addressable;
+  priceOracle: string | Addressable;
+  nftAuctionFactory: string | Addressable;
+}
 
-    const contracts=["MyToken", "MyNFT", "NFTAuction", "SingleNFTAuction"];
-    
-    for (const contractName of contracts) { 
-      const contract = await ethers.deployContract(contractName);
-      await contract.waitForDeployment();
-      
-      console.log(`${contractName} deployed to ${contract.target}`);
-    }
+async function main() {
+  const contractStartupData: Partial<ContractStartupData> = {};
 
+  const [deployer] = await ethers.getSigners();
+  contractStartupData.deployer = deployer.address;
+  console.log("部署者地址:", contractStartupData.deployer);
+  // 获取默认的以太坊提供商
+  const provider = ethers.provider;
+
+  const network = await provider.getNetwork();
+  console.log(network.toJSON());
+  contractStartupData.network = network.name;
+
+  // 打印当前网络的区块高度
+  const blockNumber = await provider.getBlockNumber();
+  console.log("当前网络的区块高度：", blockNumber);
+  contractStartupData.blockNumber = blockNumber;
+
+  // deploy MyToken
+  {
+    const contract = await ethers.deployContract("MyToken");
+    await contract.waitForDeployment();
+    console.log(`MyToken 部署到了 ${contract.target}`);
+    contractStartupData.myToken = contract.target;
+  }
+  // deploy MyNFT
+  {
+    const contract = await ethers.deployContract("MyNFT");
+    const nft = await contract.waitForDeployment();
+    // 显示部署gas
+    console.log(`MyNFT 部署gas: ${nft.deploymentTransaction()?.gasLimit}`);
+    console.log(`MyNFT 部署到了 ${contract.target}`);
+    contractStartupData.myNFT = contract.target;
+  }
+  // deploy PriceOracle with ethPriceFeed as argument
+  {
+    const ethPriceFeed = process.env.ETH_PRICE_FEED;
+    const contract = await ethers.deployContract("ChainlinkPriceOracle", [ethPriceFeed]);
+    await contract.waitForDeployment();
+    console.log(`ChainlinkPriceOracle 部署到了 ${contract.target}`);
+    contractStartupData.priceOracle = contract.target;
+  }
+  // deploy NFTAuctionFactory in UUPS Proxy mode
+  {
+
+    const contract = await ethers.getContractFactory("NFTAuctionFactory");
+    const nftAuctionFactory = await upgrades.deployProxy(contract, [deployer.address, deployer.address,]);
+    await nftAuctionFactory.waitForDeployment();
+    console.log(`NFTAuctionFactory 部署到了 ${nftAuctionFactory.target}`);
+    contractStartupData.nftAuctionFactory = nftAuctionFactory.target;
+  }
+  console.log(JSON.stringify(contractStartupData));
 }
 
 main().catch((error) => {

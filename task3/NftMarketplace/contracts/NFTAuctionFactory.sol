@@ -3,17 +3,13 @@ pragma solidity ^0.8.22;
 
 import "./interfaces/INFTAuctionFactory.sol";
 import "./SingleNFTAuction.sol";
-// import {
-//     Initializable
-// } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {
-    OwnableUpgradeable
-} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import {
-    UUPSUpgradeable
-} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract NFTAuctionFactory is
+    Initializable,
     OwnableUpgradeable,
     UUPSUpgradeable,
     INFTAuctionFactory
@@ -43,7 +39,7 @@ contract NFTAuctionFactory is
     ) internal override onlyOwner {}
 
     /**
-     * @dev 创建新的NFT拍卖合约
+     * @dev 创建新的NFT拍卖合约（UUPS可升级版本）
      * @param nftContract NFT合约地址
      * @param seller 卖家地址
      * @param tokenId NFT token ID
@@ -71,9 +67,22 @@ contract NFTAuctionFactory is
         require(startingPrice > 0, "NFTAuctionFactory: startingPrice is zero");
         require(duration > 0, "NFTAuctionFactory: duration is zero");
 
-        // 部署新的SingleNFTAuction合约
-        SingleNFTAuction newAuction = new SingleNFTAuction();
-        address auctionAddress = address(newAuction);
+        // 部署SingleNFTAuction实现合约
+        SingleNFTAuction implementation = new SingleNFTAuction();
+        
+        // 部署UUPS代理合约
+        bytes memory initData = abi.encodeWithSelector(
+            SingleNFTAuction.initialize.selector,
+            seller,  // initialOwner 设置为卖家
+            address(0)  // priceOracle 初始化为0地址，后续可以设置
+        );
+        
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(implementation),
+            initData
+        );
+        
+        address auctionAddress = address(proxy);
 
         // 将新拍卖合约添加到列表
         allAuctions.push(auctionAddress);
