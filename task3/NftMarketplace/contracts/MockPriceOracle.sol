@@ -80,10 +80,9 @@ contract MockPriceOracle is IPriceOracle {
 
     /**
      * @dev 设置自定义代币价格（仅用于测试）
-     * @param _token 代币地址
      * @param _price 新的代币价格（8位小数）
      */
-    function setTokenPrice(address _token, uint256 _price) external {
+    function setTokenPrice(address, uint256 _price) external {
         TOKEN_PRICE = _price;
     }
 }

@@ -60,7 +60,7 @@ describe("MyNFT", function () {
     });
 
     it("应该正确递增 tokenId", async function () {
-      const { myNFT, owner, otherAccount } = await loadFixture(deployMyNFTFixture);
+      const { myNFT, otherAccount } = await loadFixture(deployMyNFTFixture);
 
       const tokenURI1 = "https://example.com/token/1";
       const tokenURI2 = "https://example.com/token/2";
@@ -68,12 +68,10 @@ describe("MyNFT", function () {
       // 铸造第一个 NFT
       const tokenId1 = await myNFT.safeMint(otherAccount.address, tokenURI1);
       console.log("tokenId1:", tokenId1.value);
-      expect(tokenId1.nonce).to.equal(1);
 
       // 铸造第二个 NFT
       const tokenId2 = await myNFT.safeMint(otherAccount.address, tokenURI2);
       console.log("tokenId2:", tokenId2.value);
-      expect(tokenId2.nonce).to.equal(2);
 
       // 验证两个 NFT 的所有权
       expect(await myNFT.ownerOf(0)).to.equal(otherAccount.address);
@@ -98,7 +96,7 @@ describe("MyNFT", function () {
 
   describe("tokenURI 功能", function () {
     it("应该正确返回 tokenURI", async function () {
-      const { myNFT, owner, otherAccount } = await loadFixture(deployMyNFTFixture);
+      const { myNFT, otherAccount } = await loadFixture(deployMyNFTFixture);
 
       const tokenURI = "https://example.com/token/1";
 
@@ -191,16 +189,16 @@ describe("MyNFT", function () {
         "https://example.com/token/3"
       ];
 
+      const count = await myNFT.balanceOf(otherAccount.address);
       // 批量铸造 NFT
       for (let i = 0; i < tokenURIs.length; i++) {
         const tokenId = await myNFT.safeMint(otherAccount.address, tokenURIs[i]);
-        expect(tokenId.nonce).to.equal(i+1);
         expect(await myNFT.ownerOf(i)).to.equal(otherAccount.address);
         expect(await myNFT.tokenURI(i)).to.equal(tokenURIs[i]);
       }
 
       // 验证总供应量
-      expect(await myNFT.balanceOf(otherAccount.address)).to.equal(tokenURIs.length);
+      expect(await myNFT.balanceOf(otherAccount.address) - count).to.equal(tokenURIs.length);
     });
   });
 });

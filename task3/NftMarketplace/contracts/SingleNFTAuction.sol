@@ -43,10 +43,10 @@ contract SingleNFTAuction is
     mapping(address => mapping(address => uint256)) public pendingTokenReturns;
 
     function onERC721Received(
-        address operator,
-        address from,
-        uint256 tokenId,
-        bytes calldata data
+        address,
+        address,
+        uint256,
+        bytes calldata
     ) external pure returns (bytes4) {
         return IERC721Receiver.onERC721Received.selector;
     }
