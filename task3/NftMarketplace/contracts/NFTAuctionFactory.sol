@@ -3,8 +3,17 @@ pragma solidity ^0.8.22;
 
 import "./interfaces/INFTAuctionFactory.sol";
 import "./SingleNFTAuction.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-contract NFTAuctionFactory is INFTAuctionFactory {
+contract NFTAuctionFactory is
+    Initializable,
+    OwnableUpgradeable,
+    UUPSUpgradeable,
+    INFTAuctionFactory
+{
     address public feeTo; // 协议费用接收地址（如果为0地址，表示费用关闭）
     address public feeToSetter; // 有权设置 feeTo 地址的账户
     address[] public allAuctions;
@@ -12,56 +21,59 @@ contract NFTAuctionFactory is INFTAuctionFactory {
     // 映射：拍卖地址 => 是否由本工厂创建
     mapping(address => bool) public isAuctionCreatedByFactory;
 
-    constructor(address _feeToSetter) {
-        feeToSetter = _feeToSetter;
+ /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
     }
 
+    function initialize(
+        address initialOwner,
+        address _feeToSetter
+    ) public initializer {
+        __Ownable_init(initialOwner);
+        feeToSetter = _feeToSetter;
+        feeTo = address(0);
+    }
+
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyOwner {}
+
     /**
-     * @dev 创建新的NFT拍卖合约
-     * @param nftContract NFT合约地址
+     * @dev 创建新的NFT拍卖合约（UUPS可升级版本）
      * @param seller 卖家地址
-     * @param tokenId NFT token ID
-     * @param startingPrice 起拍价格
-     * @param reservePrice 保留价格
-     * @param duration 拍卖持续时间（秒）
      * @return auctionAddress 新创建的拍卖合约地址
      */
     function createAuction(
-        address nftContract,
-        address seller,
-        uint256 tokenId,
-        uint256 startingPrice,
-        uint256 reservePrice,
-        uint256 duration
+        address seller
     ) external returns (address) {
-        require(
-            nftContract != address(0),
-            "NFTAuctionFactory: nftContract is zero address"
+ 
+        // 部署SingleNFTAuction实现合约
+        SingleNFTAuction implementation = new SingleNFTAuction();
+        
+        // 部署UUPS代理合约
+        bytes memory initData = abi.encodeWithSelector(
+            SingleNFTAuction.initialize.selector,
+            seller,  // initialOwner 设置为卖家
+            address(0)  // priceOracle 初始化为0地址，后续可以设置
         );
-        require(
-            seller != address(0),
-            "NFTAuctionFactory: seller is zero address"
+        
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(implementation),
+            initData
         );
-        require(startingPrice > 0, "NFTAuctionFactory: startingPrice is zero");
-        require(duration > 0, "NFTAuctionFactory: duration is zero");
-
-        // 部署新的SingleNFTAuction合约
-        SingleNFTAuction newAuction = new SingleNFTAuction();
-        address auctionAddress = address(newAuction);
+        
+        address auctionAddress = address(proxy);
 
         // 将新拍卖合约添加到列表
         allAuctions.push(auctionAddress);
         isAuctionCreatedByFactory[auctionAddress] = true;
 
+
         // 触发拍卖创建事件
         emit AuctionCreated(
             auctionAddress,
-            nftContract,
-            seller,
-            tokenId,
-            startingPrice,
-            reservePrice,
-            duration
+            seller
         );
 
         return auctionAddress;
@@ -98,7 +110,9 @@ contract NFTAuctionFactory is INFTAuctionFactory {
      * @param auctionAddress 要检查的拍卖合约地址
      * @return 如果是本工厂创建的返回true，否则返回false
      */
-    function isFactoryAuction(address auctionAddress) external view returns (bool) {
+    function isFactoryAuction(
+        address auctionAddress
+    ) external view returns (bool) {
         return isAuctionCreatedByFactory[auctionAddress];
     }
 }

@@ -1,30 +1,21 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
-
-// OpenZeppelin 合约导入
+// Compatible with OpenZeppelin Contracts ^5.5.0
+pragma solidity ^0.8.27;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol"; // ERC20代币接口
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol"; // ERC721 NFT接口
-import "@openzeppelin/contracts/access/Ownable.sol"; // 所有权管理
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol"; // 重入攻击防护
-import "@openzeppelin/contracts/proxy/utils/Initializable.sol"; // 可升级合约支持
-import "./NFTAuctionBase.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+
 import "./interfaces/IPriceOracle.sol";
-/**
- * @title SingleNFTAuction
- * @dev 单个NFT拍卖合约，支持ETH和ERC20代币支付
- * @notice 该合约专门处理单个NFT的拍卖，部署时即绑定特定NFT
- * @dev 继承ReentrancyGuard防止重入攻击，IERC721Receiver用于接收NFT，Ownable用于权限管理
- * @dev 支持Chainlink预言机获取实时价格，提供美元价值计算
- * @dev 包含完整的拍卖生命周期管理：开始、出价、结束、资金领取等
- * @dev 支持两种支付方式：ETH和ERC20代币
- * @dev 提供安全机制：重入攻击防护、紧急提款、资金安全退回等
- * @dev 使用Initializable支持可升级合约模式
- */
+import "./interfaces/INFTAuction.sol";
+
 contract SingleNFTAuction is
-    NFTAuctionBase,
-    ReentrancyGuard,
-    Ownable,
-    Initializable
+    INFTAuction,
+    ReentrancyGuardUpgradeable,
+    OwnableUpgradeable,
+    UUPSUpgradeable
 {
     /**
      * @dev 拍卖信息结构体
@@ -51,29 +42,33 @@ contract SingleNFTAuction is
      */
     mapping(address => mapping(address => uint256)) public pendingTokenReturns;
 
-    /**
-     * @dev 构造函数
-     * @notice 初始化合约所有者和拍卖状态
-     * @dev 继承Ownable合约，将部署者设置为合约所有者
-     * @dev 初始化拍卖状态为NotStarted，表示拍卖尚未开始
-     */
-    constructor() Ownable(msg.sender) {
+    function onERC721Received(
+        address,
+        address,
+        uint256,
+        bytes calldata
+    ) external pure returns (bytes4) {
+        return IERC721Receiver.onERC721Received.selector;
+    }
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(
+        address initialOwner,
+        address _priceOracle
+    ) public initializer {
+        __ReentrancyGuard_init();
+        __Ownable_init(initialOwner);
+        priceOracle = IPriceOracle(_priceOracle);
         // 初始化拍卖状态为未开始
         auction.status = AuctionStatus.NotStarted;
     }
 
-    /**
-     * @dev 初始化函数
-     * @notice 设置价格预言机地址，用于获取ETH和ERC20代币价格
-     * @param _priceOracle 价格预言机合约地址
-     * @dev 使用initializer修饰符确保只能初始化一次
-     * @dev 需要验证预言机地址不为零地址
-     * @dev 此函数通常在合约部署后立即调用，设置必要的预言机地址
-     */
-    function initialize(address _priceOracle) public initializer {
-        require(_priceOracle != address(0), "Invalid price oracle address");
-        priceOracle = IPriceOracle(_priceOracle);
-    }
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyOwner {}
 
     /**
      * @dev 拍卖活跃状态检查修饰符
@@ -112,7 +107,6 @@ contract SingleNFTAuction is
         priceOracle = IPriceOracle(_priceOracle);
         emit PriceOracleUpdated(_priceOracle);
     }
-
 
     /**
      * @dev 开始拍卖函数
@@ -290,7 +284,10 @@ contract SingleNFTAuction is
         // 使用价格预言机计算美元价值
         uint256 amountInUSD = 0;
         if (address(priceOracle) != address(0)) {
-            try priceOracle.getTokenPrice(auction.erc20Token) returns (uint256 tokenPrice, uint256) {
+            try priceOracle.getTokenPrice(auction.erc20Token) returns (
+                uint256 tokenPrice,
+                uint256
+            ) {
                 amountInUSD = (amount * tokenPrice) / 10 ** 18;
             } catch {
                 // 如果价格查询失败，继续执行但美元价值为0
